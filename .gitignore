@@ -1,0 +1,29 @@
+# Rust 构建产物（CLI 项目的 Cargo.lock 保留在版本库）
+/target/
+
+# 本地运行回执（含订单意图记录，不进版本库）
+/.hl-trader/
+hl-trader.toml
+hl-trader.local.toml
+
+# 本地环境变量（保留不含秘密的示例）
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# 本地凭据与私钥（忽略规则不能替代提交前检查）
+/.aws/
+/secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# 运行日志、编辑器临时文件和系统元数据
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
