@@ -27,9 +27,32 @@ pub struct Config {
     pub secret_file: PathBuf,
     /// 单笔名义金额上限（USD）。这是防误操作的本地限制，不是账户级资金保护。
     pub max_notional_usd: Decimal,
+    /// pair 每腿名义占权益比例（0 < x ≤ 0.7，PHASE2_PLAN §2 硬上限）。
+    #[serde(default = "default_leg_fraction")]
+    pub leg_fraction: Decimal,
+    /// 人工核实的解锁日历锚点（PHASE2_PLAN §4；空 = 看板显示“未配置”）。
+    #[serde(default)]
+    pub unlock_anchors: Vec<UnlockAnchor>,
     /// 回执目录（运行目录，不进 Git）。
     #[serde(default = "default_receipt_dir")]
     pub receipt_dir: PathBuf,
+}
+
+/// 解锁锚点：来自人工核实过的公开来源，记录来源与核实时间。
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnlockAnchor {
+    /// UTC 日期（YYYY-MM-DD），该日需要核对 announced claim。
+    pub date_utc: String,
+    /// 人类可读说明（如“团队份额月度解锁”）。
+    pub label: String,
+    /// 已核实的公开来源链接。
+    pub source_url: String,
+    /// 人工核实该来源的时间（YYYY-MM-DD）。
+    pub verified_utc: String,
+}
+
+fn default_leg_fraction() -> Decimal {
+    Decimal::new(7, 1)
 }
 
 fn default_receipt_dir() -> PathBuf {
@@ -37,6 +60,28 @@ fn default_receipt_dir() -> PathBuf {
 }
 
 impl Config {
+    pub fn account_address(&self) -> Result<Address, ConfigError> {
+        Address::from_str(&self.account_address)
+            .map_err(|e| ConfigError::Address(format!("{}: {e}", self.account_address)))
+    }
+}
+
+/// 看板（`status --json`）专用最小配置：只读、不装载交易私钥。
+///
+/// 与 [`Config`] 从同一份 TOML 解析，但只要求三个字段；`secret_file`、
+/// `max_notional_usd`、`leg_fraction` 等交易字段不要求、不校验（未知字段忽略）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct DashboardConfig {
+    /// 实际交易账户地址（公共地址）；输出时归一化为 0x 小写。
+    pub account_address: String,
+    /// pair 状态目录（只读）；必须是绝对路径，拒绝相对路径与默认回退。
+    pub receipt_dir: PathBuf,
+    /// 人工核实的解锁日历锚点（可选；条目有效性在快照时逐条判定）。
+    #[serde(default)]
+    pub unlock_anchors: Vec<UnlockAnchor>,
+}
+
+impl DashboardConfig {
     pub fn account_address(&self) -> Result<Address, ConfigError> {
         Address::from_str(&self.account_address)
             .map_err(|e| ConfigError::Address(format!("{}: {e}", self.account_address)))
@@ -55,6 +100,10 @@ pub enum ConfigError {
     Parse(String),
     #[error("配置项 account_address 不是合法的 EVM 地址: {0}")]
     Address(String),
+    #[error("配置项 leg_fraction 必须在 (0, 0.7] 区间内，实际 {0}")]
+    LegFraction(String),
+    #[error("看板配置要求 receipt_dir 为显式的绝对路径（只读状态位置），实际: {0}")]
+    ReceiptDirNotAbsolute(String),
 }
 
 pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
@@ -64,6 +113,26 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     })?;
     let cfg: Config = toml::from_str(&text).map_err(|e| ConfigError::Parse(e.to_string()))?;
     cfg.account_address()?;
+    if cfg.leg_fraction <= Decimal::ZERO || cfg.leg_fraction > Decimal::new(7, 1) {
+        return Err(ConfigError::LegFraction(cfg.leg_fraction.to_string()));
+    }
+    Ok(cfg)
+}
+
+/// 看板配置加载：只读入口，绝不读取/校验 `secret_file`，也不装载签名器。
+pub fn load_dashboard_config(path: &Path) -> Result<DashboardConfig, ConfigError> {
+    let text = fs::read_to_string(path).map_err(|source| ConfigError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let cfg: DashboardConfig =
+        toml::from_str(&text).map_err(|e| ConfigError::Parse(e.to_string()))?;
+    cfg.account_address()?;
+    if !cfg.receipt_dir.is_absolute() {
+        return Err(ConfigError::ReceiptDirNotAbsolute(
+            cfg.receipt_dir.to_string_lossy().into_owned(),
+        ));
+    }
     Ok(cfg)
 }
 
@@ -131,9 +200,18 @@ pub fn load_agent_signer(secret_path: &Path) -> Result<PrivateKeySigner, SecretE
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
+    static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// 每次调用生成唯一目录：默认并行测试运行时，同进程多个测试若共用
+    /// PID 目录会互相删除对方文件（PHASE2_PLAN §7.1）。
     fn tempdir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hltrader-cfg-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "hltrader-cfg-{}-{}",
+            std::process::id(),
+            DIR_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -225,5 +303,132 @@ max_notional_usd = "50"
         )
         .unwrap();
         assert!(matches!(load_config(&bad), Err(ConfigError::Address(_))));
+    }
+
+    #[test]
+    fn leg_fraction_default_bounds_and_anchors() {
+        let dir = tempdir();
+        let p = dir.join("frac.toml");
+        fs::write(
+            &p,
+            r#"
+account_address = "0x1111111111111111111111111111111111111111"
+secret_file = "/tmp/agent.key"
+max_notional_usd = "50"
+"#,
+        )
+        .unwrap();
+        let cfg = load_config(&p).unwrap();
+        assert_eq!(cfg.leg_fraction, Decimal::new(7, 1));
+        assert!(cfg.unlock_anchors.is_empty());
+
+        fs::write(
+            &p,
+            r#"
+account_address = "0x1111111111111111111111111111111111111111"
+secret_file = "/tmp/agent.key"
+max_notional_usd = "50"
+leg_fraction = "0.9"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(load_config(&p), Err(ConfigError::LegFraction(_))));
+
+        fs::write(
+            &p,
+            r#"
+account_address = "0x1111111111111111111111111111111111111111"
+secret_file = "/tmp/agent.key"
+max_notional_usd = "50"
+leg_fraction = "0.5"
+
+[[unlock_anchors]]
+date_utc = "2026-11-06"
+label = "团队份额月度解锁"
+source_url = "https://example.com/unlock"
+verified_utc = "2026-10-15"
+"#,
+        )
+        .unwrap();
+        let cfg = load_config(&p).unwrap();
+        assert_eq!(cfg.leg_fraction, Decimal::new(5, 1));
+        assert_eq!(cfg.unlock_anchors.len(), 1);
+        assert_eq!(cfg.unlock_anchors[0].date_utc, "2026-11-06");
+    }
+
+    #[test]
+    fn dashboard_config_loads_without_secret_file() {
+        let dir = tempdir();
+        let p = dir.join("dashboard.toml");
+        fs::write(
+            &p,
+            r#"
+account_address = "0x7F2120F612B78D579197762196B8A202AB654096"
+receipt_dir = "/var/lib/hl-trader/state"
+
+[[unlock_anchors]]
+date_utc = "2026-11-06"
+label = "团队份额月度解锁"
+source_url = "https://example.com/unlock"
+verified_utc = "2026-10-15"
+"#,
+        )
+        .unwrap();
+        let cfg = load_dashboard_config(&p).unwrap();
+        assert_eq!(
+            cfg.account_address,
+            "0x7F2120F612B78D579197762196B8A202AB654096"
+        );
+        assert!(cfg.account_address().is_ok());
+        assert_eq!(cfg.receipt_dir, PathBuf::from("/var/lib/hl-trader/state"));
+        assert_eq!(cfg.unlock_anchors.len(), 1);
+
+        // 缺少 receipt_dir → 解析失败（致命配置错误）。
+        let bad = dir.join("no-receipt.toml");
+        fs::write(
+            &bad,
+            r#"account_address = "0x7F2120F612B78D579197762196B8A202AB654096""#,
+        )
+        .unwrap();
+        assert!(matches!(
+            load_dashboard_config(&bad),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn dashboard_config_rejects_relative_receipt_dir() {
+        let dir = tempdir();
+        let p = dir.join("rel.toml");
+        fs::write(
+            &p,
+            r#"
+account_address = "0x7F2120F612B78D579197762196B8A202AB654096"
+receipt_dir = ".hl-trader"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            load_dashboard_config(&p),
+            Err(ConfigError::ReceiptDirNotAbsolute(_))
+        ));
+    }
+
+    #[test]
+    fn dashboard_config_rejects_invalid_address() {
+        let dir = tempdir();
+        let p = dir.join("bad-addr.toml");
+        fs::write(
+            &p,
+            r#"
+account_address = "not-an-address"
+receipt_dir = "/var/lib/hl-trader/state"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            load_dashboard_config(&p),
+            Err(ConfigError::Address(_))
+        ));
     }
 }

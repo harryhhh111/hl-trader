@@ -1,7 +1,7 @@
 //! Hyperliquid 测试网协议适配。
 //!
 //! 只面向官方测试网端点；写操作默认 dry-run（见 main.rs），本模块的
-//! place_alo/cancel_oid 只在显式 --execute 路径上被调用。
+//! place_order/cancel_oid 只在显式 --execute 路径上被调用。
 //! 金额与精度校验在本地完成：元数据缺失、非法精度、零/负值、超出名义上限
 //! 一律拒绝，不静默截断、不猜默认值。
 
@@ -23,6 +23,9 @@ pub const TESTNET_API_URL: &str = "https://api.hyperliquid-testnet.xyz";
 /// 系统时间合理下限：2025-01-01T00:00:00Z（毫秒）。
 const MIN_SANE_EPOCH_MS: u64 = 1_735_689_600_000;
 
+/// 一天的毫秒数（日线蜡烛窗口计算）。
+const DAY_MS: u64 = 86_400_000;
+
 pub struct Adapter {
     client: HttpClient,
     nonces: AtomicU64,
@@ -37,8 +40,6 @@ pub enum AdapterError {
     Unknown(String),
     #[error("无权限（签名地址可能不是该账户的授权 agent）: {0}")]
     Permission(String),
-    #[error("交易所拒绝: {0}")]
-    Rejected(String),
     #[error("响应格式无法识别（结果未知）: {0}")]
     BadResponse(String),
     #[error("测试网元数据中找不到交易对 {0}")]
@@ -74,7 +75,7 @@ fn build_http_client() -> reqwest::Client {
         .expect("构建 HTTP 客户端失败")
 }
 
-fn now_epoch_ms() -> Result<u64, AdapterError> {
+pub fn now_epoch_ms() -> Result<u64, AdapterError> {
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AdapterError::Clock(format!("系统时间早于 Unix 纪元: {e}")))?
@@ -92,10 +93,20 @@ fn now_utc_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn classify_message(msg: &str, is_write: bool) -> AdapterError {
+fn classify_message(msg: &str, _is_write: bool) -> AdapterError {
     let lower = msg.to_ascii_lowercase();
     if lower.contains("timed out") || lower.contains("timeout") || lower.contains("deadline") {
         return AdapterError::Unknown(format!("超时或连接中断: {msg}"));
+    }
+    // 传输层错误：请求未到达或未确认到达交易所，一律“结果未知”，
+    // 绝不能按拒单处理（PHASE2_PLAN §7.1：只有交易所确认的拒绝才是拒单）。
+    if lower.contains("error sending request")
+        || lower.contains("error trying to connect")
+        || lower.contains("connection refused")
+        || lower.contains("tcp connect error")
+        || lower.contains("dns error")
+    {
+        return AdapterError::Unknown(format!("网络层错误（交易所未确认收到请求）: {msg}"));
     }
     if msg.starts_with("HTTP 401") || msg.starts_with("HTTP 403") {
         return AdapterError::Permission(msg.to_string());
@@ -106,11 +117,9 @@ fn classify_message(msg: &str, is_write: bool) -> AdapterError {
     if lower.contains("body=") || lower.contains("error decoding") || lower.contains("expected") {
         return AdapterError::BadResponse(msg.to_string());
     }
-    if is_write {
-        AdapterError::Rejected(msg.to_string())
-    } else {
-        AdapterError::Unknown(msg.to_string())
-    }
+    // hypersdk ActionError flattens transport errors and top-level rejection
+    // into one string. Only typed per-order errors establish a rejection.
+    AdapterError::Unknown(msg.to_string())
 }
 
 fn classify_action_error<T: std::fmt::Debug>(e: ActionError<T>) -> AdapterError {
@@ -176,12 +185,51 @@ pub struct AccountView {
 }
 
 pub struct OrderStatusView {
+    pub finished: bool,
+    pub filled: bool,
     pub oid: u64,
     pub status: String,
     pub coin: String,
     pub side: &'static str,
     pub limit_px: Decimal,
     pub sz: Decimal,
+}
+
+/// 盘口第一层买/卖价（任一方向缺盘口即为 None）。
+pub struct BboView {
+    pub bid: Option<Decimal>,
+    pub ask: Option<Decimal>,
+    pub time_ms: u64,
+}
+
+/// 单个永续市场的当前资金费与标记/预言机价格（metaAndAssetCtxs）。
+pub struct AssetCtxView {
+    /// 当前小时资金费率（小数，如 0.0001 = 0.01%）。
+    pub funding: Decimal,
+    pub mark_px: Decimal,
+    pub oracle_px: Decimal,
+}
+
+/// 账户一条资金费收付记录（userFunding）。
+pub struct FundingPaymentView {
+    pub coin: String,
+    pub time_ms: u64,
+    /// 本次收付的 USDC 金额（正 = 收到，负 = 付出）。
+    pub usdc: Decimal,
+    pub funding_rate: Decimal,
+}
+
+/// 账户一条成交记录（userFillsByTime）。
+pub struct FillView {
+    pub coin: String,
+    pub px: Decimal,
+    pub sz: Decimal,
+    pub buy: bool,
+    pub time_ms: u64,
+    pub fee: Decimal,
+    pub fee_token: String,
+    pub closed_pnl: Decimal,
+    pub oid: u64,
 }
 
 #[derive(Debug)]
@@ -222,7 +270,7 @@ impl Adapter {
 
     /// 测试专用入口：指向本地 mock 服务器。不暴露给 CLI。
     #[cfg(test)]
-    fn with_base_url(base: &str) -> Self {
+    pub(crate) fn with_base_url(base: &str) -> Self {
         let client = HttpClient::new(Chain::Testnet)
             .with_url(base.parse().expect("mock url"))
             .with_http_client(build_http_client());
@@ -319,7 +367,7 @@ impl Adapter {
         })
     }
 
-    pub async fn place_alo(
+    pub async fn place_order(
         &self,
         signer: &PrivateKeySigner,
         intent: &OrderIntent,
@@ -331,10 +379,8 @@ impl Adapter {
                 is_buy: intent.buy,
                 limit_px: intent.price,
                 sz: intent.size,
-                reduce_only: false,
-                order_type: OrderTypePlacement::Limit {
-                    tif: TimeInForce::Alo,
-                },
+                reduce_only: intent.reduce_only,
+                order_type: OrderTypePlacement::Limit { tif: intent.tif },
                 cloid: intent.cloid,
             }],
             grouping: OrderGrouping::Na,
@@ -380,6 +426,8 @@ impl Adapter {
             .await
             .map_err(classify_info_error)?;
         Ok(update.map(|u| OrderStatusView {
+            finished: u.status.is_finished() && !matches!(u.status, OrderStatus::Triggered),
+            filled: u.status.is_filled(),
             oid: u.order.oid,
             status: u.status.to_string(),
             coin: u.order.coin,
@@ -419,6 +467,219 @@ impl Adapter {
             }
         })
     }
+
+    /// 盘口第一层买/卖价。pair 的 IOC 保护价以此计算（PHASE2_PLAN §2）。
+    pub async fn bbo(&self, coin: &str) -> Result<BboView, AdapterError> {
+        let book = self
+            .client
+            .l2_book(coin.to_string(), None, None)
+            .await
+            .map_err(classify_info_error)?;
+        Ok(BboView {
+            bid: book.best_bid().map(|l| l.px),
+            ask: book.best_ask().map(|l| l.px),
+            time_ms: book.time,
+        })
+    }
+
+    /// 当前资金费率与标记/预言机价格（每小时结算，费率为小时口径）。
+    pub async fn asset_ctx(&self, coin: &str) -> Result<AssetCtxView, AdapterError> {
+        let v = self
+            .client
+            .meta_and_asset_ctxs(None)
+            .await
+            .map_err(classify_info_error)?;
+        parse_asset_ctx(&v, coin)
+    }
+
+    /// Paginate with an inclusive timestamp cursor and deduplicate overlap.
+    /// A saturated timestamp or retained-history limit is an error, never a complete history.
+    pub async fn user_funding_since(
+        &self,
+        user: Address,
+        start_ms: u64,
+    ) -> Result<Vec<FundingPaymentView>, AdapterError> {
+        let end = now_epoch_ms()?;
+        let mut cursor = start_ms;
+        let mut all = std::collections::BTreeMap::new();
+        for _ in 0..1000 {
+            let entries = self
+                .client
+                .user_funding(user, cursor, Some(end))
+                .await
+                .map_err(classify_info_error)?;
+            let count = entries.len();
+            let next = entries.iter().map(|e| e.time).max().unwrap_or(cursor);
+            for e in entries {
+                if e.time < cursor || e.time > end {
+                    return Err(AdapterError::BadResponse("资金费记录超出请求区间".into()));
+                }
+                all.insert((e.time, e.hash.clone(), e.delta.coin.clone()), e);
+            }
+            if count < 500 {
+                return Ok(all
+                    .into_values()
+                    .map(|e| FundingPaymentView {
+                        coin: e.delta.coin,
+                        time_ms: e.time,
+                        usdc: e.delta.usdc,
+                        funding_rate: e.delta.funding_rate,
+                    })
+                    .collect());
+            }
+            if next <= cursor {
+                return Err(AdapterError::BadResponse(
+                    "资金费分页无法推进，历史不完整".into(),
+                ));
+            }
+            cursor = next;
+        }
+        Err(AdapterError::BadResponse(
+            "资金费历史超过本次分页上限".into(),
+        ))
+    }
+
+    pub async fn user_fills_since(
+        &self,
+        user: Address,
+        start_ms: u64,
+    ) -> Result<Vec<FillView>, AdapterError> {
+        let end = now_epoch_ms()?;
+        let mut cursor = start_ms;
+        let mut all = std::collections::BTreeMap::new();
+        for _ in 0..1000 {
+            let entries = self
+                .client
+                .user_fills_by_time(user, cursor, Some(end))
+                .await
+                .map_err(classify_info_error)?;
+            let count = entries.len();
+            let next = entries.iter().map(|e| e.time).max().unwrap_or(cursor);
+            for e in entries {
+                if e.time < cursor || e.time > end {
+                    return Err(AdapterError::BadResponse("成交记录超出请求区间".into()));
+                }
+                all.insert((e.coin.clone(), e.tid), e);
+            }
+            if all.len() >= 10000 {
+                return Err(AdapterError::BadResponse(
+                    "达到交易所成交保留上限，不能保证完整核算".into(),
+                ));
+            }
+            if count < 2000 {
+                let mut fills: Vec<_> = all
+                    .into_values()
+                    .map(|f| FillView {
+                        coin: f.coin,
+                        px: f.px,
+                        sz: f.sz,
+                        buy: matches!(f.side, Side::Bid),
+                        time_ms: f.time,
+                        fee: f.fee,
+                        fee_token: f.fee_token,
+                        closed_pnl: f.closed_pnl,
+                        oid: f.oid,
+                    })
+                    .collect();
+                fills.sort_by_key(|f| f.time_ms);
+                return Ok(fills);
+            }
+            if next <= cursor {
+                return Err(AdapterError::BadResponse(
+                    "成交分页无法推进，历史不完整".into(),
+                ));
+            }
+            cursor = next;
+        }
+        Err(AdapterError::BadResponse("成交历史超过本次分页上限".into()))
+    }
+
+    pub async fn cross_margin(&self, user: Address, coin: &str) -> Result<bool, AdapterError> {
+        let data = self
+            .client
+            .active_asset_data(user, coin.into())
+            .await
+            .map_err(classify_info_error)?;
+        if data.user != user || data.coin != coin {
+            return Err(AdapterError::BadResponse(
+                "保证金模式响应账户/市场不匹配".into(),
+            ));
+        }
+        Ok(data.leverage.leverage_type == "cross")
+    }
+
+    /// 把某永续标的设置为全仓模式并指定杠杆（pair 开仓的前提条件）。
+    pub async fn set_cross_leverage(
+        &self,
+        signer: &PrivateKeySigner,
+        asset: usize,
+        leverage: u32,
+    ) -> Result<(), AdapterError> {
+        let nonce = self.next_nonce()?;
+        self.client
+            .update_leverage(signer, asset, true, leverage, nonce, None, None)
+            .await
+            .map_err(classify_info_error)
+    }
+
+    /// 最近 days 天的日线收盘价（蜡烛收盘时间毫秒 + 收盘价）。
+    pub async fn daily_closes(
+        &self,
+        coin: &str,
+        days: u32,
+    ) -> Result<Vec<(u64, Decimal)>, AdapterError> {
+        let end = now_epoch_ms()?;
+        let start = end.saturating_sub(u64::from(days) * DAY_MS);
+        let candles = self
+            .client
+            .candle_snapshot(coin.to_string(), CandleInterval::OneDay, start, end)
+            .await
+            .map_err(classify_info_error)?;
+        Ok(candles
+            .into_iter()
+            .map(|c| (c.close_time, c.close))
+            .collect())
+    }
+}
+
+/// 从 metaAndAssetCtxs 原始响应中解析指定市场的 ctx。
+///
+/// 响应形态为 `[{"universe":[...]}, [{"funding":"...","markPx":"...","oraclePx":"..."},...]]`；
+/// universe 下标与 ctxs 下标一一对应。任何字段缺失/非法都按 BadResponse（无法识别），
+/// 不猜默认值。
+fn parse_asset_ctx(v: &serde_json::Value, coin: &str) -> Result<AssetCtxView, AdapterError> {
+    let arr = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| {
+        AdapterError::BadResponse("metaAndAssetCtxs 响应不是 [meta, ctxs]".into())
+    })?;
+    let universe = arr[0]
+        .get("universe")
+        .and_then(|u| u.as_array())
+        .ok_or_else(|| AdapterError::BadResponse("metaAndAssetCtxs 缺少 universe 数组".into()))?;
+    let ctxs = arr[1]
+        .as_array()
+        .ok_or_else(|| AdapterError::BadResponse("metaAndAssetCtxs 缺少 ctxs 数组".into()))?;
+    let idx = universe
+        .iter()
+        .position(|m| m.get("name").and_then(|n| n.as_str()) == Some(coin))
+        .ok_or_else(|| AdapterError::UnknownCoin(coin.to_string()))?;
+    let ctx = ctxs.get(idx).ok_or_else(|| {
+        AdapterError::BadResponse(format!(
+            "metaAndAssetCtxs ctxs[{idx}] 缺失（universe 有 {coin}）"
+        ))
+    })?;
+    let dec = |key: &str| -> Result<Decimal, AdapterError> {
+        ctx.get(key)
+            .and_then(|x| x.as_str())
+            .and_then(|s| s.parse::<Decimal>().ok())
+            .ok_or_else(|| {
+                AdapterError::BadResponse(format!("metaAndAssetCtxs {coin}.{key} 缺失或非法"))
+            })
+    };
+    Ok(AssetCtxView {
+        funding: dec("funding")?,
+        mark_px: dec("markPx")?,
+        oracle_px: dec("oraclePx")?,
+    })
 }
 
 pub struct OrderIntent {
@@ -427,6 +688,10 @@ pub struct OrderIntent {
     pub price: Decimal,
     pub size: Decimal,
     pub cloid: Cloid,
+    /// 生效时间指令：Alo（maker-only）或 Ioc（taker，未成交即撤）。
+    pub tif: TimeInForce,
+    /// 只减仓单：只允许平掉现有持仓，不允许反向开仓（平仓/兜底必须使用）。
+    pub reduce_only: bool,
 }
 
 pub fn find_market<'a>(
@@ -662,8 +927,10 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let outcome = a.place_alo(&test_signer(), &intent).await.unwrap();
+        let outcome = a.place_order(&test_signer(), &intent).await.unwrap();
         assert!(matches!(outcome, PlaceOutcome::Resting { oid: 1001 }));
     }
 
@@ -681,8 +948,10 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let outcome = a.place_alo(&test_signer(), &intent).await.unwrap();
+        let outcome = a.place_order(&test_signer(), &intent).await.unwrap();
         match outcome {
             PlaceOutcome::Filled {
                 oid,
@@ -711,13 +980,15 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let outcome = a.place_alo(&test_signer(), &intent).await.unwrap();
+        let outcome = a.place_order(&test_signer(), &intent).await.unwrap();
         assert!(matches!(outcome, PlaceOutcome::Rejected(_)));
     }
 
     #[tokio::test]
-    async fn place_top_level_error_maps_to_rejected() {
+    async fn place_flattened_top_level_error_is_conservatively_unknown() {
         let server = MockServer::start_async().await;
         server.mock(|when, then| {
             when.method(httpmock::Method::POST).path("/exchange");
@@ -730,9 +1001,11 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let err = a.place_alo(&test_signer(), &intent).await.unwrap_err();
-        assert!(matches!(err, AdapterError::Rejected(_)), "got {err:?}");
+        let err = a.place_order(&test_signer(), &intent).await.unwrap_err();
+        assert!(matches!(err, AdapterError::Unknown(_)), "got {err:?}");
     }
 
     #[tokio::test]
@@ -749,8 +1022,28 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let err = a.place_alo(&test_signer(), &intent).await.unwrap_err();
+        let err = a.place_order(&test_signer(), &intent).await.unwrap_err();
+        assert!(matches!(err, AdapterError::Unknown(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn place_connection_refused_is_unknown_not_rejected() {
+        // 传输层错误（交易所未确认收到请求）必须是“结果未知”，不能误报拒单
+        //（PHASE2_PLAN §7.1）。127.0.0.1:9 为 discard 端口，连接应被拒绝。
+        let a = Adapter::with_base_url("http://127.0.0.1:9");
+        let intent = OrderIntent {
+            asset: 0,
+            buy: true,
+            price: Decimal::new(60000, 0),
+            size: Decimal::new(1, 3),
+            cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
+        };
+        let err = a.place_order(&test_signer(), &intent).await.unwrap_err();
         assert!(matches!(err, AdapterError::Unknown(_)), "got {err:?}");
     }
 
@@ -768,8 +1061,10 @@ mod tests {
             price: Decimal::new(60000, 0),
             size: Decimal::new(1, 3),
             cloid: cloid_ones(),
+            tif: TimeInForce::Alo,
+            reduce_only: false,
         };
-        let err = a.place_alo(&test_signer(), &intent).await.unwrap_err();
+        let err = a.place_order(&test_signer(), &intent).await.unwrap_err();
         assert!(
             matches!(err, AdapterError::BadResponse(_) | AdapterError::Unknown(_)),
             "got {err:?}"
@@ -891,5 +1186,262 @@ mod tests {
         let n1 = a.next_nonce().unwrap();
         let n2 = a.next_nonce().unwrap();
         assert!(n2 > n1);
+    }
+
+    const L2_BOOK_BTC: &str = r#"{
+        "coin": "BTC", "time": 1760000000000, "snapshot": true,
+        "levels": [[{"px": "65000", "sz": "1", "n": 1}],
+                   [{"px": "65010", "sz": "2", "n": 1}]]
+    }"#;
+
+    const META_CTXS: &str = r#"[
+        {"universe": [{"szDecimals": 5, "name": "BTC", "maxLeverage": 40, "onlyIsolated": false}]},
+        [{"funding": "0.0001", "markPx": "65000", "oraclePx": "65005",
+          "openInterest": "10", "prevDayPx": "64000"}]
+    ]"#;
+
+    const USER_FUNDING: &str = r#"[
+        {"delta": {"type": "funding", "coin": "BTC", "usdc": "0.5", "szi": "0.001",
+                   "fundingRate": "0.0001", "nSamples": null},
+         "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+         "time": 1760000000000}
+    ]"#;
+
+    const USER_FILLS: &str = r#"[
+        {"coin": "BTC", "px": "65000", "sz": "0.001", "side": "B", "time": 1760000000000,
+         "startPosition": "0", "dir": "Open Long", "closedPnl": "1.5",
+         "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+         "oid": 5, "crossed": true, "fee": "-0.1", "tid": 1, "cloid": null, "feeToken": "USDC"}
+    ]"#;
+
+    const CANDLES: &str = r#"[
+        {"t": 1759276800000, "T": 1759363200000, "s": "BTC", "i": "1d",
+         "o": "64000", "h": "66000", "l": "63000", "c": "65000", "v": "100", "n": 10}
+    ]"#;
+
+    #[tokio::test]
+    async fn bbo_parses_best_bid_ask() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""type":"l2Book""#);
+            then.status(200).body(L2_BOOK_BTC);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let bbo = a.bbo("BTC").await.unwrap();
+        assert_eq!(bbo.bid, Some(Decimal::new(65000, 0)));
+        assert_eq!(bbo.ask, Some(Decimal::new(65010, 0)));
+        assert_eq!(bbo.time_ms, 1760000000000);
+    }
+
+    #[tokio::test]
+    async fn asset_ctx_parses_funding_and_prices() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes("metaAndAssetCtxs");
+            then.status(200).body(META_CTXS);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let ctx = a.asset_ctx("BTC").await.unwrap();
+        assert_eq!(ctx.funding, Decimal::new(1, 4));
+        assert_eq!(ctx.mark_px, Decimal::new(65000, 0));
+        assert_eq!(ctx.oracle_px, Decimal::new(65005, 0));
+        // 未知币种 → UnknownCoin
+        assert!(matches!(
+            a.asset_ctx("DOGE").await,
+            Err(AdapterError::UnknownCoin(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn user_funding_since_parses_entries() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes("userFunding");
+            then.status(200).body(USER_FUNDING);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let user: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let entries = a.user_funding_since(user, 0).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].coin, "BTC");
+        assert_eq!(entries[0].usdc, Decimal::new(5, 1));
+        assert_eq!(entries[0].funding_rate, Decimal::new(1, 4));
+    }
+
+    #[tokio::test]
+    async fn user_fills_since_parses_fee_and_pnl() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes("userFillsByTime");
+            then.status(200).body(USER_FILLS);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let user: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let fills = a.user_fills_since(user, 0).await.unwrap();
+        assert_eq!(fills.len(), 1);
+        assert!(fills[0].buy);
+        assert_eq!(fills[0].fee, Decimal::new(-1, 1));
+        assert_eq!(fills[0].closed_pnl, Decimal::new(15, 1));
+        assert_eq!(fills[0].oid, 5);
+    }
+
+    #[tokio::test]
+    async fn daily_closes_parse() {
+        let server = MockServer::start_async().await;
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes("candleSnapshot");
+            then.status(200).body(CANDLES);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let closes = a.daily_closes("BTC", 32).await.unwrap();
+        assert_eq!(closes.len(), 1);
+        assert_eq!(closes[0].1, Decimal::new(65000, 0));
+    }
+
+    #[tokio::test]
+    async fn place_ioc_and_reduce_only_wire_format() {
+        let server = MockServer::start_async().await;
+        let m = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes("Ioc")
+                .body_includes(r#""r":true"#);
+            then.status(200).body(PLACE_FILLED);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        let intent = OrderIntent {
+            asset: 0,
+            buy: false,
+            price: Decimal::new(60000, 0),
+            size: Decimal::new(1, 3),
+            cloid: cloid_ones(),
+            tif: TimeInForce::Ioc,
+            reduce_only: true,
+        };
+        let outcome = a.place_order(&test_signer(), &intent).await.unwrap();
+        assert!(matches!(outcome, PlaceOutcome::Filled { .. }));
+        assert_eq!(m.calls(), 1);
+    }
+    #[tokio::test]
+    async fn funding_pagination_deduplicates_boundary() {
+        let server = MockServer::start_async().await;
+        let prototype: serde_json::Value =
+            serde_json::from_str::<serde_json::Value>(USER_FUNDING).unwrap()[0].clone();
+        let page: Vec<_> = (1000..1500u64)
+            .map(|time| {
+                let mut e = prototype.clone();
+                e["time"] = time.into();
+                e
+            })
+            .collect();
+        let mut last = prototype.clone();
+        last["time"] = 1500u64.into();
+        let first = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""startTime":0"#);
+            then.status(200).json_body_obj(&page);
+        });
+        let second = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""startTime":1499"#);
+            then.status(200)
+                .json_body_obj(&vec![page[499].clone(), last]);
+        });
+        let entries = Adapter::with_base_url(&server.base_url())
+            .user_funding_since(Address::ZERO, 0)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 501);
+        assert_eq!(first.calls(), 1);
+        assert_eq!(second.calls(), 1);
+        assert_eq!(entries.last().unwrap().time_ms, 1500);
+    }
+
+    #[tokio::test]
+    async fn fills_pagination_deduplicates_trade_ids() {
+        let server = MockServer::start_async().await;
+        let prototype: serde_json::Value =
+            serde_json::from_str::<serde_json::Value>(USER_FILLS).unwrap()[0].clone();
+        let page: Vec<_> = (1000..3000u64)
+            .map(|time| {
+                let mut e = prototype.clone();
+                e["time"] = time.into();
+                e["tid"] = time.into();
+                e
+            })
+            .collect();
+        let mut last = prototype.clone();
+        last["time"] = 3000u64.into();
+        last["tid"] = 3000u64.into();
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""startTime":0"#);
+            then.status(200).json_body_obj(&page);
+        });
+        let second = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""startTime":2999"#);
+            then.status(200)
+                .json_body_obj(&vec![page[1999].clone(), last]);
+        });
+        let entries = Adapter::with_base_url(&server.base_url())
+            .user_fills_since(Address::ZERO, 0)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 2001);
+        assert_eq!(second.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn saturated_timestamp_reports_incomplete_history() {
+        let server = MockServer::start_async().await;
+        let mut item: serde_json::Value =
+            serde_json::from_str::<serde_json::Value>(USER_FUNDING).unwrap()[0].clone();
+        item["time"] = 1000u64.into();
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/info");
+            then.status(200).json_body_obj(&vec![item; 500]);
+        });
+        assert!(matches!(
+            Adapter::with_base_url(&server.base_url())
+                .user_funding_since(Address::ZERO, 1000)
+                .await,
+            Err(AdapterError::BadResponse(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn set_cross_leverage_wire_format() {
+        let server = MockServer::start_async().await;
+        let m = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes("updateLeverage")
+                .body_includes(r#""isCross":true"#)
+                .body_includes(r#""leverage":3"#);
+            then.status(200)
+                .body(r#"{"status":"ok","response":{"type":"default"}}"#);
+        });
+        let a = Adapter::with_base_url(&server.base_url());
+        a.set_cross_leverage(&test_signer(), 7, 3).await.unwrap();
+        assert_eq!(m.calls(), 1);
     }
 }

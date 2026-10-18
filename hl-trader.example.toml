@@ -10,5 +10,28 @@ secret_file = "/绝对路径/到/agent-testnet.key"
 # 单笔名义金额本地上限（USD）。这是防误操作的本地限制，不是账户级资金保护。
 max_notional_usd = "50"
 
+# pair 每腿名义占权益比例（0 < x ≤ 0.7，硬上限；缺省 0.7）。
+# leg_fraction = "0.7"
+
+# 人工核实的解锁日历锚点（status 看板“动态”块使用；空 = 显示“未配置”）。
+# 日期写死、不依赖第三方日历；7 天内的锚点才会提醒。
+# [[unlock_anchors]]
+# date_utc = "2026-11-06"
+# label = "示例：团队份额月度解锁"
+# source_url = "https://example.com/verified-source"
+# verified_utc = "2026-10-15"
+
 # 回执目录（默认 .hl-trader；权限 0700，回执 0600，不进 Git）。
 # receipt_dir = ".hl-trader"
+
+# ---- 看板模式（status --json）说明 ----
+# 看板使用独立的只读配置入口：以上配置即可被 status --json 读取，但它要求
+# receipt_dir 为显式的绝对路径，且绝不读取 secret_file（不装载交易私钥）。
+# 更稳妥的做法是给 Web 后端单独一份无秘密配置，例如：
+#
+#   account_address = "0x<账户地址>"
+#   receipt_dir = "/绝对路径/到/.hl-trader"
+#   # unlock_anchors 可选，见上方示例
+#
+# 进程契约：stdout 只含一个单行 JSON 对象；配置错误等非 0 退出且 stdout 无 JSON；
+# 区块级降级（partial/unavailable）仍返回 0，原因见 JSON 内 diagnostics。

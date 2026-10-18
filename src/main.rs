@@ -5,7 +5,11 @@
 
 mod config;
 mod hyperliquid;
+mod intel;
+mod pair;
 mod receipt;
+mod snapshot;
+mod write_lock;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -54,7 +58,7 @@ enum Commands {
         #[arg(long)]
         address: Option<String>,
     },
-    /// 限价 ALO（post-only）单。默认只预览；--execute 才签名提交。
+    /// 限价单。默认 ALO（post-only）只预览；--execute 才签名提交。
     Order {
         #[arg(long)]
         coin: String,
@@ -69,16 +73,24 @@ enum Commands {
         /// 客户端订单 ID：0x 开头的 128 位十六进制（32 个 hex 字符）。
         #[arg(long)]
         cloid: String,
+        /// 生效时间指令：alo（默认，maker-only）或 ioc（taker，未成交即撤）。
+        #[arg(long, value_enum, default_value = "alo")]
+        tif: TifArg,
         /// 显式授权：加载 agent 私钥并签名提交。不加则只预览校验。
         #[arg(long)]
         execute: bool,
     },
-    /// 按 cloid 查询订单真实状态（不需要私钥）。
+    /// 不带 --cloid：看板（仓位 + 资金费 + 动态，只读）。带 --cloid：查订单真实状态。
     Status {
         #[arg(long)]
         address: Option<String>,
-        #[arg(long)]
-        cloid: String,
+        /// 按 cloid 查询订单真实状态；不带则显示看板。
+        #[arg(long, conflicts_with = "json")]
+        cloid: Option<String>,
+        /// 输出结构化 JSON 快照（看板数据源）：使用配置中的账户地址，只读、不装载私钥。
+        /// 与 --cloid 互斥；不带 --cloid 的文本看板不受影响。
+        #[arg(long, conflicts_with = "cloid")]
+        json: bool,
     },
     /// 按交易所订单 ID 撤指定单。默认只预览；--execute 才签名提交。
     Cancel {
@@ -89,12 +101,41 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
+    /// 把某永续标的设置为全仓模式并指定杠杆（pair 开仓的前提）。默认只预览。
+    Margin {
+        #[arg(long)]
+        coin: String,
+        /// 目标杠杆（1..=该市场上限）。
+        #[arg(long)]
+        leverage: u32,
+        #[arg(long)]
+        execute: bool,
+    },
+    /// 开 pair：多 HYPE 永续 + 空 BTC 永续，等名义，taker IOC。默认只预览。
+    Open {
+        /// 每腿 USD 名义；缺省用 min(配置单笔上限, 配置比例×权益)。
+        #[arg(long)]
+        notional: Option<String>,
+        #[arg(long)]
+        execute: bool,
+    },
+    /// 关掉整个 pair（reduce-only 平掉两腿）。默认只预览。
+    Close {
+        #[arg(long)]
+        execute: bool,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
 enum SideArg {
     Buy,
     Sell,
+}
+
+#[derive(Clone, ValueEnum)]
+enum TifArg {
+    Alo,
+    Ioc,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -110,12 +151,24 @@ async fn main() -> ExitCode {
             price,
             size,
             cloid,
+            tif,
             execute,
-        } => cmd_order(&config_path, coin, side, price, size, cloid, execute).await,
-        Commands::Status { address, cloid } => cmd_status(&config_path, address, cloid).await,
+        } => cmd_order(&config_path, coin, side, price, size, cloid, tif, execute).await,
+        Commands::Status {
+            address,
+            cloid,
+            json,
+        } => cmd_status(&config_path, address, cloid, json).await,
         Commands::Cancel { coin, oid, execute } => {
             cmd_cancel(&config_path, coin, oid, execute).await
         }
+        Commands::Open { notional, execute } => cmd_open(&config_path, notional, execute).await,
+        Commands::Close { execute } => cmd_close(&config_path, execute).await,
+        Commands::Margin {
+            coin,
+            leverage,
+            execute,
+        } => cmd_margin(&config_path, coin, leverage, execute).await,
     }
 }
 
@@ -168,6 +221,12 @@ fn prepare_signer(cfg: &Config) -> Result<PrivateKeySigner, ExitCode> {
     }
     Adapter::check_clock().map_err(runtime_err)?;
     Ok(signer)
+}
+
+fn prepare_writer(cfg: &Config) -> Result<(PrivateKeySigner, write_lock::WriteLock), ExitCode> {
+    let signer = prepare_signer(cfg)?;
+    let guard = write_lock::WriteLock::agent(signer.address()).map_err(runtime_err)?;
+    Ok((signer, guard))
 }
 
 async fn cmd_market(coin: &str) -> ExitCode {
@@ -244,6 +303,7 @@ async fn cmd_account(config_path: &std::path::Path, address: Option<String>) -> 
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI 命令处理函数：参数即 clap 解析结果
 async fn cmd_order(
     config_path: &std::path::Path,
     coin: String,
@@ -251,6 +311,7 @@ async fn cmd_order(
     price: String,
     size: String,
     cloid: String,
+    tif: TifArg,
     execute: bool,
 ) -> ExitCode {
     let price: Decimal = match price.parse() {
@@ -268,6 +329,15 @@ async fn cmd_order(
     let cloid_str = cloid_hex(cloid);
     let buy = matches!(side, SideArg::Buy);
     let side_str = if buy { "buy" } else { "sell" };
+    let tif = match tif {
+        TifArg::Alo => hypersdk::hypercore::types::TimeInForce::Alo,
+        TifArg::Ioc => hypersdk::hypercore::types::TimeInForce::Ioc,
+    };
+    let tif_str = match tif {
+        hypersdk::hypercore::types::TimeInForce::Alo => "Alo（post-only）",
+        hypersdk::hypercore::types::TimeInForce::Ioc => "Ioc（taker，未成交即撤）",
+        _ => "其他",
+    };
 
     let adapter = Adapter::testnet();
     let perps = match adapter.perp_markets().await {
@@ -292,7 +362,7 @@ async fn cmd_order(
     println!("price: {price}");
     println!("size: {size}");
     println!("cloid: {cloid_str}");
-    println!("tif: Alo（post-only；挂单后仍可能成交，不保证可撤销）");
+    println!("tif: {tif_str}；挂单后仍可能成交，不保证可撤销");
     println!("notional_usd: {}", price * size);
 
     if !execute {
@@ -300,7 +370,7 @@ async fn cmd_order(
         return ExitCode::from(EXIT_OK);
     }
 
-    let signer = match prepare_signer(&cfg) {
+    let (signer, _writer_guard) = match prepare_writer(&cfg) {
         Ok(s) => s,
         Err(code) => return code,
     };
@@ -311,6 +381,8 @@ async fn cmd_order(
         price,
         size,
         cloid,
+        tif,
+        reduce_only: false,
     };
 
     let store = ReceiptStore::new(cfg.receipt_dir.clone());
@@ -345,7 +417,7 @@ async fn cmd_order(
         Err(e) => return runtime_err(e),
     };
 
-    match adapter.place_alo(&signer, &intent).await {
+    match adapter.place_order(&signer, &intent).await {
         Ok(PlaceOutcome::Resting { oid }) => {
             guard.update(
                 ReceiptState::Resting,
@@ -380,11 +452,6 @@ async fn cmd_order(
             eprintln!("rejected-permission: {msg}");
             ExitCode::from(EXIT_ERROR)
         }
-        Err(AdapterError::Rejected(msg)) => {
-            guard.update(ReceiptState::Rejected, None, Some(msg.clone()));
-            eprintln!("rejected: {msg}");
-            ExitCode::from(EXIT_ERROR)
-        }
         Err(e @ (AdapterError::Unknown(_) | AdapterError::BadResponse(_))) => {
             guard.update(ReceiptState::Unknown, None, Some(e.to_string()));
             unknown_result(&cloid_str, &e.to_string())
@@ -396,8 +463,15 @@ async fn cmd_order(
 async fn cmd_status(
     config_path: &std::path::Path,
     address: Option<String>,
-    cloid: String,
+    cloid: Option<String>,
+    json: bool,
 ) -> ExitCode {
+    if json {
+        return cmd_status_json(config_path).await;
+    }
+    let Some(cloid) = cloid else {
+        return cmd_dashboard(config_path, address).await;
+    };
     let cloid = match parse_cloid(&cloid) {
         Ok(c) => c,
         Err(e) => return usage_err(format!("cloid 非法: {e}")),
@@ -439,6 +513,132 @@ async fn cmd_status(
     }
 }
 
+/// `status --json`：只读结构化快照（stock_data 看板契约 §4.1）。
+/// 致命配置错误 → stderr + 非 0 退出，stdout 不出 JSON；成功 → stdout 单行紧凑 JSON。
+async fn cmd_status_json(config_path: &std::path::Path) -> ExitCode {
+    let cfg = match config::load_dashboard_config(config_path) {
+        Ok(c) => c,
+        Err(e) => return usage_err(format!("配置错误: {e}")),
+    };
+    let adapter = Adapter::testnet();
+    let snapshot = snapshot::collect(&adapter, &cfg).await;
+    let line = match snapshot::to_json_line(&snapshot) {
+        Ok(l) => l,
+        Err(e) => return runtime_err(format!("快照序列化失败: {e}")),
+    };
+    println!("{line}");
+    ExitCode::from(EXIT_OK)
+}
+
+async fn cmd_open(
+    config_path: &std::path::Path,
+    notional: Option<String>,
+    execute: bool,
+) -> ExitCode {
+    let cfg = match load_cfg(config_path) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let requested: Option<Decimal> = match notional {
+        Some(n) => match n.parse() {
+            Ok(v) => Some(v),
+            Err(e) => return usage_err(format!("--notional 不是合法十进制数: {e}")),
+        },
+        None => None,
+    };
+    let writer = if execute {
+        match prepare_writer(&cfg) {
+            Ok(s) => Some(s),
+            Err(code) => return code,
+        }
+    } else {
+        None
+    };
+    let signer = writer.as_ref().map(|(signer, _guard)| signer);
+    let adapter = Adapter::testnet();
+    match pair::run_open(&adapter, signer, &cfg, requested, execute).await {
+        Ok(report) => {
+            let (code, lines) = report.into_exit_code();
+            for l in lines {
+                if code == std::process::ExitCode::from(EXIT_OK) {
+                    println!("{l}");
+                } else {
+                    eprintln!("{l}");
+                }
+            }
+            code
+        }
+        Err(pair::PairError::Unresolved(m)) => {
+            eprintln!("结果待核对: {m}");
+            ExitCode::from(EXIT_UNKNOWN)
+        }
+        Err(pair::PairError::Refused(m)) => runtime_err(m),
+        Err(pair::PairError::Locked(p)) => runtime_err(format!(
+            "无法获取 pair 写锁 {}；请等待现有写进程结束，不要删除锁文件",
+            p.display()
+        )),
+        Err(e) => runtime_err(e),
+    }
+}
+
+async fn cmd_close(config_path: &std::path::Path, execute: bool) -> ExitCode {
+    let cfg = match load_cfg(config_path) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let writer = if execute {
+        match prepare_writer(&cfg) {
+            Ok(s) => Some(s),
+            Err(code) => return code,
+        }
+    } else {
+        None
+    };
+    let signer = writer.as_ref().map(|(signer, _guard)| signer);
+    let adapter = Adapter::testnet();
+    match pair::run_close(&adapter, signer, &cfg, execute).await {
+        Ok(report) => {
+            let (code, lines) = report.into_exit_code();
+            for l in lines {
+                if code == std::process::ExitCode::from(EXIT_OK) {
+                    println!("{l}");
+                } else {
+                    eprintln!("{l}");
+                }
+            }
+            code
+        }
+        Err(pair::PairError::Unresolved(m)) => {
+            eprintln!("结果待核对: {m}");
+            ExitCode::from(EXIT_UNKNOWN)
+        }
+        Err(pair::PairError::Refused(m)) => runtime_err(m),
+        Err(pair::PairError::Locked(p)) => runtime_err(format!(
+            "无法获取 pair 写锁 {}；请等待现有写进程结束，不要删除锁文件",
+            p.display()
+        )),
+        Err(e) => runtime_err(e),
+    }
+}
+
+async fn cmd_dashboard(config_path: &std::path::Path, address: Option<String>) -> ExitCode {
+    let mut cfg = match load_cfg(config_path) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::testnet();
+    if let Some(address) = address {
+        if let Err(e) = address.parse::<Address>() {
+            return usage_err(e);
+        }
+        cfg.account_address = address;
+    }
+    for line in intel::render(&adapter, &cfg).await {
+        println!("{line}");
+    }
+    ExitCode::from(EXIT_OK)
+}
+
 async fn cmd_cancel(
     config_path: &std::path::Path,
     coin: String,
@@ -467,7 +667,7 @@ async fn cmd_cancel(
         Ok(c) => c,
         Err(code) => return code,
     };
-    let signer = match prepare_signer(&cfg) {
+    let (signer, _writer_guard) = match prepare_writer(&cfg) {
         Ok(s) => s,
         Err(code) => return code,
     };
@@ -490,6 +690,82 @@ async fn cmd_cancel(
         }
         Err(e @ (AdapterError::Unknown(_) | AdapterError::BadResponse(_))) => {
             unknown_result(&format!("oid={oid}"), &e.to_string())
+        }
+        Err(e) => runtime_err(e),
+    }
+}
+
+async fn cmd_margin(
+    config_path: &std::path::Path,
+    coin: String,
+    leverage: u32,
+    execute: bool,
+) -> ExitCode {
+    let adapter = Adapter::testnet();
+    let perps = match adapter.perp_markets().await {
+        Ok(p) => p,
+        Err(e) => return runtime_err(e),
+    };
+    let market = match hyperliquid::find_market(&perps, &coin) {
+        Ok(m) => m,
+        Err(e) => return usage_err(e),
+    };
+    if leverage == 0 || u64::from(leverage) > market.max_leverage {
+        return usage_err(format!(
+            "杠杆 {leverage} 超出该市场允许范围 1..={}",
+            market.max_leverage
+        ));
+    }
+    let cfg = match load_cfg(config_path) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
+    let user = match cfg.account_address() {
+        Ok(u) => u,
+        Err(e) => return usage_err(e),
+    };
+    let current = match adapter.cross_margin(user, &market.name).await {
+        Ok(cross) => {
+            if cross {
+                "cross"
+            } else {
+                "isolated"
+            }
+        }
+        Err(e) => return runtime_err(e),
+    };
+
+    println!("network: {NETWORK}");
+    println!("coin: {}", market.name);
+    println!("asset_index: {}", market.index);
+    println!("current_margin_mode: {current}");
+    println!("planned: 设为全仓(cross) {leverage}x");
+    if !execute {
+        println!("dry-run: 未加载私钥、未签名、未发送。确认无误后加 --execute 显式设置。");
+        return ExitCode::from(EXIT_OK);
+    }
+
+    let (signer, _writer_guard) = match prepare_writer(&cfg) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    match adapter
+        .set_cross_leverage(&signer, market.index, leverage)
+        .await
+    {
+        Ok(()) => {
+            println!(
+                "已设置: {} → cross {leverage}x (asset_index={})",
+                market.name, market.index
+            );
+            ExitCode::from(EXIT_OK)
+        }
+        Err(AdapterError::Permission(msg)) => {
+            eprintln!("margin-failed-permission: {msg}");
+            ExitCode::from(EXIT_ERROR)
+        }
+        Err(e @ (AdapterError::Unknown(_) | AdapterError::BadResponse(_))) => {
+            unknown_result(&format!("coin={coin}"), &e.to_string())
         }
         Err(e) => runtime_err(e),
     }

@@ -17,6 +17,7 @@
 | chrono | 0.4.45 | MIT OR Apache-2.0 | UTC 时间输出 |
 | anyhow / thiserror | 1.x / 2.x | MIT OR Apache-2.0 / MIT OR Apache-2.0 | 错误处理 |
 | zeroize | 1.x | MIT OR Apache-2.0 | 私钥文件读取后的内存清零 |
+| scraper | 0.27.0（固定版本，无默认 features） | ISC | 解析官方 Telegram 公开预览 HTML，提取原文链接与发布时间 |
 | httpmock（dev） | 0.8.3 | MIT | 离线 mock HTTP 测试服务器 |
 
 ## 关键传递依赖
@@ -24,7 +25,10 @@
 - alloy 2.5.x（MIT OR Apache-2.0）：EIP-712 签名、EVM 类型。
 - rustls / aws-lc-rs / ring（ISC/Apache/BSD 系列）：TLS。其中 `aws-lc-sys`、`ring`、`blst`、
   `c-kzg`、`secp256k1-sys` 含 C/汇编代码，许可证分别为混合宽松许可证（见 `cargo tree` 明细）。
-- MPL-2.0 共 3 个 crate：`hypersdk`、`fastrlp`、`yawc`（后两者为 hypersdk 传递依赖）。
+- SDK 链路的 MPL-2.0 crate：`hypersdk`、`fastrlp`、`yawc`（后两者为 hypersdk 传递依赖）。
+- 公告 HTML 解析新增：`html5ever` / `markup5ever` / `web_atoms`（MIT OR Apache-2.0）、
+  `ego-tree`（ISC）、`selectors` / `cssparser` / `cssparser-macros` / `dtoa-short`（MPL-2.0）。
+  许可证于 2026-10-16 按下载包的 Cargo.toml 核对，源码未修改，其余传递依赖由 Cargo.lock 固定。
 
 ## MPL-2.0 说明
 
@@ -47,3 +51,18 @@ crates.io 固定版本使用。
 ## 本项目自身许可证
 
 待用户确认（MVP_PLAN §2，未默认指定 MIT 或 AGPL）。
+
+## 第二阶段执行流程参考核对（2026-10-15）
+
+本地 `nofx-quant` 核对版本为 `622c6f4a16b7904cad7c86ae9bdb84bb7a42bf73`。
+本次阅读并对照了以下流程，未复制或逐行改写其代码：
+
+| 参考文件 | 对照结论与本项目处理 |
+|---|---|
+| `trader/hyperliquid/trader_orders.go` | 参考 IOC 和 reduce-only 用途；忽略响应后返回 `orderId=0` / `FILLED` 的做法不采用，本项目解析实际响应并核对持仓。 |
+| `trader/hyperliquid/order_sync.go` | 参考真实成交查询、去重和持仓核对思路；本项目在 CLI 显式动作中核对，不引入后台同步服务或数据库。 |
+| `trader/hyperliquid/sync_test.go` | 参考成交方向和持仓变化的验证范围；本项目增加中断、未知结果、持久化失败与残仓恢复的独立 mock 用例。 |
+
+本次未引入新 crate。互斥使用 Rust 标准库文件锁，状态保存与交易编排为本项目实现。
+API 分页及最小金额另核对 [官方 Info API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)
+与 [官方错误响应](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses)，不从参考项目推断协议保证。

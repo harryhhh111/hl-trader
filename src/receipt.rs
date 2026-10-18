@@ -66,7 +66,8 @@ pub enum ReceiptError {
     )]
     Duplicate(String),
     #[error(
-        "相同 cloid 的提交正在进行中（锁存在但无回执）。结果未知，请人工核对: hl-trader status --address <账户地址> --cloid {0}"
+        "相同 cloid 的提交正在进行中（锁存在但无回执）。结果未知，请人工核对: hl-trader status --address <账户地址> --cloid {0}。\
+         确认交易所侧无该订单后，可人工删除 {0}.lock 再重试"
     )]
     InProgress(String),
     #[error("回执目录 {0}: {1}")]
@@ -95,8 +96,9 @@ impl ReceiptStore {
     /// 创建意图回执并持有互斥锁，直到 guard 被 drop。
     ///
     /// - 回执已存在 → Duplicate（提醒去查交易所真实状态）
-    /// - 锁存在但无回执 → InProgress（另一进程在提交，或上次崩溃在发送前；
-    ///   保守处理为“结果未知”，不抢锁、不重复提交）
+    /// - 锁存在但无回执 → InProgress（另一进程在提交，或上次在发送前崩溃）。
+    ///   保守处理为“结果未知”：不抢锁、不删除锁、不重复提交（PHASE2_PLAN §3.1：
+    ///   锁不能因“回执存在”而被删除；删除活锁会让两个进程同时拥有同一 cloid）。
     pub fn begin(&self, receipt: &Receipt) -> Result<ReceiptGuard<'_>, ReceiptError> {
         fs::create_dir_all(&self.dir).map_err(|e| ReceiptError::Io(self.dir.clone(), e))?;
         // 目录本身也收紧到仅所有者可读写。
@@ -112,8 +114,16 @@ impl ReceiptStore {
             return Err(ReceiptError::Duplicate(cloid));
         }
         self.acquire_lock(&cloid)?;
+        let guard = ReceiptGuard {
+            store: self,
+            cloid: cloid.clone(),
+        };
+        // A previous holder may have finished between the initial read and locking.
+        if self.receipt_path(&cloid).exists() {
+            return Err(ReceiptError::Duplicate(cloid));
+        }
         self.write(&cloid, receipt)?;
-        Ok(ReceiptGuard { store: self, cloid })
+        Ok(guard)
     }
 
     fn acquire_lock(&self, cloid: &str) -> Result<(), ReceiptError> {
@@ -128,14 +138,10 @@ impl ReceiptStore {
         };
         match try_create() {
             Ok(()) => Ok(()),
+            // 锁已存在：无论是活锁还是陈旧锁，一律不删除（删除可能删掉另一进程的活锁，
+            // 造成两个进程同时提交同一 cloid）。保守报“结果未知”，由人工核对后处理。
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                if self.receipt_path(cloid).exists() {
-                    // 上次进程在写完回执后、释放锁前崩溃：锁是陈旧的，清掉后重试一次。
-                    fs::remove_file(&lock).map_err(|e| ReceiptError::Io(lock.clone(), e))?;
-                    try_create().map_err(|_| ReceiptError::InProgress(cloid.to_string()))
-                } else {
-                    Err(ReceiptError::InProgress(cloid.to_string()))
-                }
+                Err(ReceiptError::InProgress(cloid.to_string()))
             }
             Err(e) => Err(ReceiptError::Io(lock, e)),
         }
@@ -159,6 +165,9 @@ impl ReceiptStore {
         f.sync_all().map_err(|e| ReceiptError::Io(tmp.clone(), e))?;
         fs::rename(&tmp, self.receipt_path(cloid))
             .map_err(|e| ReceiptError::Io(self.receipt_path(cloid), e))?;
+        fs::File::open(&self.dir)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|e| ReceiptError::Io(self.dir.clone(), e))?;
         Ok(())
     }
 
@@ -190,7 +199,9 @@ impl ReceiptGuard<'_> {
             }
             r.detail = detail;
             // 尽力写；写失败不应掩盖交易所结果，只报告原始错误。
-            let _ = self.store.write(&self.cloid, &r);
+            if let Err(e) = self.store.write(&self.cloid, &r) {
+                eprintln!("回执更新失败，交易所结果仍以本次输出为准: {e}");
+            }
         }
     }
 }
@@ -204,9 +215,18 @@ impl Drop for ReceiptGuard<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
+    static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// 每次调用生成唯一目录：默认并行测试运行时，同进程多个测试若共用
+    /// PID 目录会互相删除对方文件（PHASE2_PLAN §7.1）。
     fn tempdir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hltrader-rcpt-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "hltrader-rcpt-{tag}-{}-{}",
+            std::process::id(),
+            DIR_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = fs::remove_dir_all(&dir);
         dir
     }

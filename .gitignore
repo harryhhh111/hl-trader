@@ -27,3 +27,6 @@ hl-trader.local.toml
 *~
 .DS_Store
 Thumbs.db
+
+# 本机看板运行配置（含机器相关绝对路径，不进版本库）
+hl-trader-dashboard.toml
