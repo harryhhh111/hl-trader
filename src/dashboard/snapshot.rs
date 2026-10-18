@@ -138,7 +138,7 @@ pub struct PositionsBlock {
     pub source_queries: PositionsSources,
     pub items: Option<Vec<PositionItem>>,
     pub position_state: &'static str,
-    /// 指定两腿未实现盈亏合计；仅两腿实际仓位都确认且各行有效时计算。
+    /// 指定两腿实际持仓行的未实现盈亏合计；单腿取该行，确认空仓为 0。
     pub unrealized_pnl: Option<String>,
     pub notional_ratio: Option<String>,
     pub ratio_drift_pct: Option<String>,
@@ -314,21 +314,34 @@ fn block_status(sources_ok: &[bool], diagnostics: &[String]) -> BlockStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct AssetCtx {
-    funding: Decimal,
-    mark_px: Decimal,
-    oracle_px: Decimal,
-    listed: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarketListing {
+    Missing,
+    Active,
+    Delisted,
 }
 
-/// 从 metaAndAssetCtxs 原始响应解析指定完整 coin 的 ctx；coin 不在 universe → listed=false。
+#[derive(Debug, Clone, Copy)]
+struct AssetCtx {
+    funding: Option<Decimal>,
+    mark_px: Option<Decimal>,
+    oracle_px: Option<Decimal>,
+    listing: MarketListing,
+}
+
+impl AssetCtx {
+    fn is_active(&self) -> bool {
+        self.listing == MarketListing::Active
+    }
+}
+
+/// 从 metaAndAssetCtxs 原始响应解析指定完整 coin 的 ctx，保留字段缺失与下架状态。
 fn parse_asset_ctx(value: &serde_json::Value, coin: &str) -> AssetCtx {
     let empty = AssetCtx {
-        funding: Decimal::ZERO,
-        mark_px: Decimal::ZERO,
-        oracle_px: Decimal::ZERO,
-        listed: false,
+        funding: None,
+        mark_px: None,
+        oracle_px: None,
+        listing: MarketListing::Missing,
     };
     let Some(arr) = value.as_array().filter(|a| a.len() == 2) else {
         return empty;
@@ -345,20 +358,28 @@ fn parse_asset_ctx(value: &serde_json::Value, coin: &str) -> AssetCtx {
     else {
         return empty;
     };
-    let Some(ctx) = ctxs.get(idx) else {
-        return empty;
+    let listing = if universe[idx]
+        .get("isDelisted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        MarketListing::Delisted
+    } else {
+        MarketListing::Active
     };
-    let dec = |key: &str| -> Decimal {
+    let Some(ctx) = ctxs.get(idx) else {
+        return AssetCtx { listing, ..empty };
+    };
+    let dec = |key: &str| -> Option<Decimal> {
         ctx.get(key)
             .and_then(|x| x.as_str())
             .and_then(|s| s.parse::<Decimal>().ok())
-            .unwrap_or(Decimal::ZERO)
     };
     AssetCtx {
         funding: dec("funding"),
         mark_px: dec("markPx"),
         oracle_px: dec("oraclePx"),
-        listed: true,
+        listing,
     }
 }
 
@@ -702,10 +723,16 @@ fn build_positions_block(
     }
 
     for (i, coin) in descriptor.coins.iter().enumerate() {
-        if let Some(contexts) = ctx
-            && !contexts[i].listed
-        {
-            diagnostics.push(format!("{coin} 不在市场元数据中（可能已下架或未上市）"));
+        if let Some(contexts) = ctx {
+            match contexts[i].listing {
+                MarketListing::Missing => {
+                    diagnostics.push(format!("{coin} 不在市场元数据中（可能已下架或未上市）"))
+                }
+                MarketListing::Delisted => {
+                    diagnostics.push(format!("{coin} 已下架，实时行情与估算不可用"))
+                }
+                MarketListing::Active => {}
+            }
         }
     }
 
@@ -738,10 +765,12 @@ fn build_positions_block(
                 Some(p) => {
                     let coin = &descriptor.coins[i];
                     let mark = ctx
-                        .filter(|c| c[i].listed && c[i].mark_px > Decimal::ZERO)
-                        .map(|c| c[i].mark_px);
+                        .filter(|c| c[i].is_active())
+                        .and_then(|c| c[i].mark_px)
+                        .filter(|m| *m > Decimal::ZERO);
                     if mark.is_none() {
-                        diagnostics.push(format!("{coin} 标记价格缺失或非正数，名义不可用"));
+                        diagnostics
+                            .push(format!("{coin} 标记价格缺失、非正数或已下架，名义不可用"));
                     }
                     let size = p.szi.abs();
                     notionals.push(mark.map(|m| size * m));
@@ -764,14 +793,17 @@ fn build_positions_block(
                 None => notionals.push(None),
             }
         }
+        unrealized_total = Some(
+            legs.iter()
+                .flatten()
+                .map(|p| p.unrealized_pnl)
+                .sum::<Decimal>()
+                .to_string(),
+        );
         position_state = match (first, second) {
-            (None, None) => {
-                unrealized_total = Some("0".to_string());
-                "flat"
-            }
+            (None, None) => "flat",
             (Some(_), None) | (None, Some(_)) => "single_leg",
             (Some(a), Some(b)) => {
-                unrealized_total = Some((a.unrealized_pnl + b.unrealized_pnl).to_string());
                 if (a.szi > Decimal::ZERO) == (b.szi > Decimal::ZERO) {
                     diagnostics.push("两腿同向持仓，不宣称对冲正常".to_string());
                     "same_direction"
@@ -857,10 +889,28 @@ fn build_funding_block(
         ]
     });
 
+    if let Some(reason) = &market.reason {
+        diagnostics.push(format!("市场行情查询失败（{reason}）"));
+    }
+
     let mut hourly_rates = BTreeMap::new();
     let mut annualized_pct = BTreeMap::new();
     for (i, coin) in descriptor.coins.iter().enumerate() {
-        let rate = ctx.filter(|c| c[i].listed).map(|c| c[i].funding);
+        let rate = ctx.filter(|c| c[i].is_active()).and_then(|c| c[i].funding);
+        if let Some(contexts) = ctx {
+            match contexts[i].listing {
+                MarketListing::Delisted => {
+                    diagnostics.push(format!("{coin} 已下架，当前费率与日收付估算不可用"));
+                }
+                MarketListing::Missing => {
+                    diagnostics.push(format!("{coin} 不在市场元数据中，当前费率不可用"));
+                }
+                MarketListing::Active if rate.is_none() => {
+                    diagnostics.push(format!("{coin} 资金费率缺失或非法，当前费率不可用"));
+                }
+                MarketListing::Active => {}
+            }
+        }
         hourly_rates.insert(coin.clone(), rate.map(|r| r.to_string()));
         annualized_pct.insert(
             coin.clone(),
@@ -895,14 +945,20 @@ fn build_funding_block(
                     if s.is_zero() {
                         continue; // 未持仓币种的费率缺失不影响另一腿
                     }
-                    match ctx.filter(|c| c[i].listed) {
-                        Some(c) if c[i].oracle_px > Decimal::ZERO => {
-                            net -= s * c[i].oracle_px * c[i].funding;
+                    let inputs = ctx.filter(|c| c[i].is_active()).and_then(|c| {
+                        match (c[i].oracle_px, c[i].funding) {
+                            (Some(oracle), Some(rate)) if oracle > Decimal::ZERO => {
+                                Some((oracle, rate))
+                            }
+                            _ => None,
                         }
-                        _ => {
+                    });
+                    match inputs {
+                        Some((oracle, rate)) => net -= s * oracle * rate,
+                        None => {
                             computable = false;
                             diagnostics.push(format!(
-                                "{} 行情不可用，日收付估算无法计算",
+                                "{} 资金费率、预言机价格或上市状态不可用，日收付估算无法计算",
                                 descriptor.coins[i]
                             ));
                         }
@@ -930,35 +986,44 @@ fn build_funding_block(
 
     let (window_complete, actual_48h_net, recent_payments) = match &funding_history.value {
         Some(history) => {
-            if let Some(err) = &history.error {
-                diagnostics.push(format!("资金费历史获取不完整（{err}），已获取部分净收付"));
-            }
             let pair: Vec<&FundingRecord> = history
                 .records
                 .iter()
                 .filter(|r| r.time_ms >= window_start_ms && r.time_ms < window_end_ms)
                 .filter(|r| r.coin == descriptor.coins[0] || r.coin == descriptor.coins[1])
                 .collect();
-            let net: Decimal = pair.iter().map(|r| r.usdc).sum();
-            let mut sorted = pair;
-            sorted.sort_by_key(|r| std::cmp::Reverse(r.time_ms));
-            let mut recent = Vec::new();
-            let mut dropped = 0usize;
-            for r in sorted.iter().take(3) {
-                match DateTime::<Utc>::from_timestamp_millis(r.time_ms as i64) {
-                    Some(t) => recent.push(PaymentItem {
-                        time: t.to_rfc3339_opts(SecondsFormat::Secs, true),
-                        coin: r.coin.clone(),
-                        usdc: r.usdc.to_string(),
-                        rate: r.rate.to_string(),
-                    }),
-                    None => dropped += 1,
+            if let Some(err) = &history.error {
+                let detail = if pair.is_empty() {
+                    "没有已取得的本 pair 有效记录"
+                } else {
+                    "仅展示已取得的部分净收付"
+                };
+                diagnostics.push(format!("资金费历史获取不完整（{err}），{detail}"));
+            }
+            if history.complete || !pair.is_empty() {
+                let net: Decimal = pair.iter().map(|r| r.usdc).sum();
+                let mut sorted = pair;
+                sorted.sort_by_key(|r| std::cmp::Reverse(r.time_ms));
+                let mut recent = Vec::new();
+                let mut dropped = 0usize;
+                for r in sorted.iter().take(3) {
+                    match DateTime::<Utc>::from_timestamp_millis(r.time_ms as i64) {
+                        Some(t) => recent.push(PaymentItem {
+                            time: t.to_rfc3339_opts(SecondsFormat::Secs, true),
+                            coin: r.coin.clone(),
+                            usdc: r.usdc.to_string(),
+                            rate: r.rate.to_string(),
+                        }),
+                        None => dropped += 1,
+                    }
                 }
+                if dropped > 0 {
+                    diagnostics.push(format!("{dropped} 条资金费记录时间无法解析，未展示"));
+                }
+                (history.complete, Some(net.to_string()), Some(recent))
+            } else {
+                (false, None, None)
             }
-            if dropped > 0 {
-                diagnostics.push(format!("{dropped} 条资金费记录时间无法解析，未展示"));
-            }
-            (history.complete, Some(net.to_string()), Some(recent))
         }
         None => {
             if let Some(reason) = &funding_history.reason {
@@ -1014,12 +1079,22 @@ fn build_ratio_block(
         diagnostics.push(format!("{} 日线查询失败（{reason}）", descriptor.coins[1]));
     }
 
+    if let Some(reason) = &market.reason {
+        diagnostics.push(format!("实时行情查询失败（{reason}）"));
+    }
     let live = ctx.and_then(|c| {
-        (c[0].listed && c[1].listed && c[0].mark_px > Decimal::ZERO && c[1].mark_px > Decimal::ZERO)
-            .then(|| (c[0].mark_px / c[1].mark_px).to_string())
+        if !c[0].is_active() || !c[1].is_active() {
+            return None;
+        }
+        match (c[0].mark_px, c[1].mark_px) {
+            (Some(first), Some(second)) if first > Decimal::ZERO && second > Decimal::ZERO => {
+                Some((first / second).to_string())
+            }
+            _ => None,
+        }
     });
     if ctx.is_some() && live.is_none() {
-        diagnostics.push("两腿标记价格非正或未上市，实时比价不可用".to_string());
+        diagnostics.push("两腿标记价格非正、缺失、未上市或已下架，实时比价不可用".to_string());
     }
 
     let (latest_close, as_of_date, ma30, vs_ma30_pct, points) =
@@ -1037,11 +1112,16 @@ fn build_ratio_block(
                 };
                 let first_map = closes_to_map(first);
                 let second_map = closes_to_map(second);
-                let anchor = first_map
-                    .keys()
-                    .filter(|k| second_map.contains_key(*k))
-                    .max()
-                    .cloned();
+                // 先由全部已收盘共同日期构建比价，预热完成后再裁剪展示窗口。
+                let ratios: BTreeMap<String, Decimal> = first_map
+                    .iter()
+                    .filter_map(|(date, first)| {
+                        second_map
+                            .get(date)
+                            .map(|second| (date.clone(), *first / *second))
+                    })
+                    .collect();
+                let anchor = ratios.keys().max().cloned();
                 match anchor {
                     None => {
                         diagnostics.push("没有共同收盘日，比价序列不可用".to_string());
@@ -1050,24 +1130,16 @@ fn build_ratio_block(
                     Some(anchor_date) => {
                         let anchor_day =
                             NaiveDate::parse_from_str(&anchor_date, "%Y-%m-%d").unwrap();
-                        let latest = first_map[&anchor_date] / second_map[&anchor_date];
+                        let latest = ratios[&anchor_date];
                         // 90 个日历日 points（锚 = 最近共同收盘日）；缺日保留 null 断线。
                         let mut points = Vec::new();
-                        let mut ratios: BTreeMap<String, Decimal> = BTreeMap::new();
                         for d in 0..RATIO_DISPLAY_DAYS {
                             let day =
                                 anchor_day - chrono::Duration::days(RATIO_DISPLAY_DAYS - 1 - d);
                             let key = day.to_string();
                             let f = first_map.get(&key).copied();
                             let s = second_map.get(&key).copied();
-                            let ratio = match (f, s) {
-                                (Some(f), Some(s)) if f > Decimal::ZERO && s > Decimal::ZERO => {
-                                    let r = f / s;
-                                    ratios.insert(key.clone(), r);
-                                    Some(r)
-                                }
-                                _ => None,
-                            };
+                            let ratio = ratios.get(&key).copied();
                             // 连续 30 个日历日都有 ratio 才有当日 MA（29 天预热）。
                             let ma = if ratio.is_some() {
                                 let mut window = Decimal::ZERO;
@@ -1688,7 +1760,7 @@ mod tests {
         let pos = &v["blocks"]["positions"];
         assert_eq!(pos["position_state"], "single_leg");
         assert_eq!(pos["items"].as_array().unwrap().len(), 1);
-        assert!(pos["unrealized_pnl"].is_null(), "单腿不计合计");
+        assert_eq!(pos["unrealized_pnl"], "37.5", "单腿保留已知盈亏合计");
 
         // 同向。
         let account_same = ACCOUNT_TWO_LEGS.replace(r#""szi": "-120""#, r#""szi": "120""#);
@@ -2279,5 +2351,300 @@ mod tests {
         assert_eq!(v["blocks"]["positions"]["position_state"], "flat");
         assert_eq!(v["blocks"]["funding"]["hourly_rates"]["HYPE"], "0.0001");
         assert_eq!(v["blocks"]["ratio"]["status"], "ok");
+    }
+
+    fn ready<T>(value: T) -> Timed<T> {
+        Timed {
+            value: Some(value),
+            reason: None,
+            at: Some("2026-10-19T08:00:00Z".to_string()),
+        }
+    }
+
+    fn candles_vec(now_ms: u64, coin: &str, close: &str, days: usize) -> Vec<(u64, Decimal)> {
+        let value: Vec<Value> =
+            serde_json::from_str(&candles_json(now_ms, coin, close, None, days)).unwrap();
+        value
+            .iter()
+            .map(|v| {
+                (
+                    v["T"].as_u64().unwrap(),
+                    v["c"].as_str().unwrap().parse().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn acceptance_missing_rate_must_not_be_zero() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let mut market: Value = serde_json::from_str(META_XYZ).unwrap();
+        market[1][0].as_object_mut().unwrap().remove("funding");
+        let block = build_funding_block(
+            &p.descriptor,
+            &ready(serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap()),
+            &ready(market),
+            &Timed::not_attempted(),
+            0,
+            48 * HOUR_MS,
+        );
+        assert_eq!(block.hourly_rates["xyz:NBIS"], None);
+        assert_eq!(block.annualized_pct["xyz:NBIS"], None);
+        assert!(block.daily_estimate.is_none());
+        assert!(block.diagnostics.iter().any(|d| d.contains("缺失或非法")));
+    }
+
+    #[test]
+    fn market_fields_preserve_invalid_zero_negative_and_delisted_states() {
+        let mut market: Value = serde_json::from_str(META_XYZ).unwrap();
+        for invalid in [Value::Null, json!("not-a-number")] {
+            market[1][0]["funding"] = invalid;
+            assert_eq!(parse_asset_ctx(&market, "xyz:NBIS").funding, None);
+        }
+        market[1][0].as_object_mut().unwrap().remove("funding");
+        assert_eq!(parse_asset_ctx(&market, "xyz:NBIS").funding, None);
+        market[1][0]["funding"] = json!("0");
+        assert_eq!(
+            parse_asset_ctx(&market, "xyz:NBIS").funding,
+            Some(Decimal::ZERO)
+        );
+        market[1][0]["funding"] = json!("-0.0001");
+        assert!(parse_asset_ctx(&market, "xyz:NBIS").funding.unwrap() < Decimal::ZERO);
+        market[1][0]["markPx"] = Value::Null;
+        market[1][0]["oraclePx"] = json!("bad");
+        let ctx = parse_asset_ctx(&market, "xyz:NBIS");
+        assert_eq!(ctx.mark_px, None);
+        assert_eq!(ctx.oracle_px, None);
+        assert_eq!(ctx.listing, MarketListing::Active);
+        assert_eq!(
+            parse_asset_ctx(&market, "xyz:MISSING").listing,
+            MarketListing::Missing
+        );
+    }
+
+    #[test]
+    fn missing_rate_on_unpositioned_leg_does_not_block_daily_estimate() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let mut account: Value = serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap();
+        account["assetPositions"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        let mut market: Value = serde_json::from_str(META_XYZ).unwrap();
+        market[1][1].as_object_mut().unwrap().remove("funding");
+        let block = build_funding_block(
+            &p.descriptor,
+            &ready(serde_json::from_value(account).unwrap()),
+            &ready(market),
+            &Timed::not_attempted(),
+            0,
+            48 * HOUR_MS,
+        );
+        assert_eq!(block.hourly_rates["xyz:CRWV"], None);
+        assert!(block.daily_estimate.is_some());
+    }
+
+    #[test]
+    fn acceptance_failed_history_must_not_be_zero() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let history = ready(FundingHistory {
+            records: vec![],
+            complete: false,
+            error: Some("HTTP 500".to_string()),
+        });
+        let block = build_funding_block(
+            &p.descriptor,
+            &Timed::not_attempted(),
+            &Timed::not_attempted(),
+            &history,
+            0,
+            48 * HOUR_MS,
+        );
+        assert_eq!(block.actual_48h_net, None);
+        assert!(block.recent_payments.is_none());
+        assert!(!block.window_complete);
+    }
+
+    #[test]
+    fn funding_history_distinguishes_empty_partial_other_and_zero_sum() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let record = |coin: &str, usdc: &str| FundingRecord {
+            coin: coin.to_string(),
+            time_ms: HOUR_MS,
+            usdc: usdc.parse().unwrap(),
+            rate: Decimal::ZERO,
+        };
+        let build = |records, complete| {
+            build_funding_block(
+                &p.descriptor,
+                &Timed::not_attempted(),
+                &Timed::not_attempted(),
+                &ready(FundingHistory {
+                    records,
+                    complete,
+                    error: (!complete).then(|| "page failed".to_string()),
+                }),
+                0,
+                48 * HOUR_MS,
+            )
+        };
+
+        let complete_empty = build(vec![], true);
+        assert_eq!(complete_empty.actual_48h_net.as_deref(), Some("0"));
+        assert_eq!(complete_empty.recent_payments.unwrap().len(), 0);
+        assert!(complete_empty.window_complete);
+
+        let other_only = build(
+            vec![FundingRecord {
+                coin: "xyz:OTHER".to_string(),
+                time_ms: HOUR_MS,
+                usdc: Decimal::ONE,
+                rate: Decimal::ZERO,
+            }],
+            false,
+        );
+        assert_eq!(other_only.actual_48h_net, None);
+        assert!(other_only.recent_payments.is_none());
+
+        let zero_sum = build(
+            vec![record("xyz:NBIS", "1.5"), record("xyz:CRWV", "-1.5")],
+            false,
+        );
+        assert_eq!(
+            zero_sum.actual_48h_net.unwrap().parse::<Decimal>().unwrap(),
+            Decimal::ZERO
+        );
+        assert_eq!(zero_sum.recent_payments.unwrap().len(), 2);
+        assert!(!zero_sum.window_complete);
+    }
+
+    #[test]
+    fn acceptance_single_leg_pnl_must_be_preserved() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let mut account: Value = serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap();
+        account["assetPositions"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        let block = build_positions_block(
+            &p.descriptor,
+            &ready(serde_json::from_value(account).unwrap()),
+            &ready(vec![]),
+            &ready(serde_json::from_str(META_XYZ).unwrap()),
+        );
+        assert_eq!(block.unrealized_pnl.as_deref(), Some("37.5"));
+        assert_eq!(
+            block.items.unwrap()[0].unrealized_pnl.as_deref(),
+            Some("37.5")
+        );
+    }
+
+    #[test]
+    fn second_single_leg_negative_pnl_must_be_preserved() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let mut account: Value = serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap();
+        account["assetPositions"].as_array_mut().unwrap().remove(0);
+        let block = build_positions_block(
+            &p.descriptor,
+            &ready(serde_json::from_value(account).unwrap()),
+            &ready(vec![]),
+            &ready(serde_json::from_str(META_XYZ).unwrap()),
+        );
+        assert_eq!(block.position_state, "single_leg");
+        assert_eq!(block.unrealized_pnl.as_deref(), Some("-24"));
+        assert_eq!(block.items.unwrap()[0].side, "short");
+    }
+
+    #[test]
+    fn acceptance_delisted_market_must_not_be_listed() {
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let mut market: Value = serde_json::from_str(META_XYZ).unwrap();
+        market[0]["universe"][0]["isDelisted"] = json!(true);
+        assert_eq!(
+            parse_asset_ctx(&market, "xyz:NBIS").listing,
+            MarketListing::Delisted
+        );
+        let positions = build_positions_block(
+            &p.descriptor,
+            &ready(serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap()),
+            &ready(vec![]),
+            &ready(market.clone()),
+        );
+        assert_eq!(positions.items.as_ref().unwrap().len(), 2);
+        assert_eq!(positions.items.as_ref().unwrap()[0].mark_px, None);
+        assert_eq!(positions.unrealized_pnl.as_deref(), Some("13.5"));
+        assert!(positions.diagnostics.iter().any(|d| d.contains("已下架")));
+
+        let funding = build_funding_block(
+            &p.descriptor,
+            &ready(serde_json::from_str(ACCOUNT_TWO_LEGS).unwrap()),
+            &ready(market),
+            &Timed::not_attempted(),
+            0,
+            48 * HOUR_MS,
+        );
+        assert_eq!(funding.hourly_rates["xyz:NBIS"], None);
+        assert!(funding.daily_estimate.is_none());
+        assert_ne!(funding.status, BlockStatus::Ok);
+    }
+
+    #[test]
+    fn acceptance_ma_warmup_must_cover_first_display_day() {
+        let now = realtime_ms();
+        let today = DateTime::<Utc>::from_timestamp_millis(now as i64)
+            .unwrap()
+            .date_naive();
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", None);
+        let block = build_ratio_block(
+            &p.descriptor,
+            &Timed::not_attempted(),
+            &None,
+            &ready(candles_vec(now, "xyz:NBIS", "80", 121)),
+            &ready(candles_vec(now, "xyz:CRWV", "10", 121)),
+            now,
+            today,
+        );
+        let points = block.points.unwrap();
+        assert_eq!(points.len(), 90);
+        assert_eq!(points[0].ma30.as_deref(), Some("8"));
+        assert_eq!(points[89].ma30.as_deref(), Some("8"));
+    }
+
+    #[test]
+    fn ma_boundaries_and_warmup_gap_are_preserved() {
+        let now = realtime_ms();
+        let today = DateTime::<Utc>::from_timestamp_millis(now as i64)
+            .unwrap()
+            .date_naive();
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", None);
+        let ratio = |first, second| {
+            build_ratio_block(
+                &p.descriptor,
+                &Timed::not_attempted(),
+                &None,
+                &ready(first),
+                &ready(second),
+                now,
+                today,
+            )
+        };
+        let short = ratio(
+            candles_vec(now, "xyz:NBIS", "80", 29),
+            candles_vec(now, "xyz:CRWV", "10", 29),
+        );
+        assert_eq!(short.points.unwrap().last().unwrap().ma30, None);
+        let enough = ratio(
+            candles_vec(now, "xyz:NBIS", "80", 30),
+            candles_vec(now, "xyz:CRWV", "10", 30),
+        );
+        assert_eq!(
+            enough.points.unwrap().last().unwrap().ma30.as_deref(),
+            Some("8")
+        );
+
+        let mut first = candles_vec(now, "xyz:NBIS", "80", 121);
+        first.remove(10);
+        let gapped = ratio(first, candles_vec(now, "xyz:CRWV", "10", 121));
+        assert_eq!(gapped.points.unwrap()[0].ma30, None);
     }
 }
