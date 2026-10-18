@@ -1,0 +1,25 @@
+{
+  "config_version": 1,
+  "pairs": [
+    {
+      "id": "hype-btc",
+      "label": "HYPE / BTC",
+      "enabled": true,
+      "network": "mainnet",
+      "dex": "",
+      "coins": ["HYPE", "BTC"],
+      "account_address": null,
+      "unlock_anchors": []
+    },
+    {
+      "id": "nbis-crwv",
+      "label": "NBIS / CRWV",
+      "enabled": true,
+      "network": "mainnet",
+      "dex": "xyz",
+      "coins": ["xyz:NBIS", "xyz:CRWV"],
+      "account_address": null,
+      "unlock_anchors": null
+    }
+  ]
+}

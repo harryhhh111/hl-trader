@@ -93,6 +93,47 @@ verified_utc = "2026-10-15"
 调用方进程契约（stock_data 侧）：参数数组调用（不经 shell），30s 进程期限、1 MiB
 stdout 上限；非 0 退出码、超时或非法 JSON 均为失败，不伪造快照。
 
+### dashboard（v2 多 pair 主网只读看板）
+
+独立于 v1 的新入口（多 pair 方案）：同一二进制，不同的配置与网络边界。
+
+```sh
+# /path/to/pairs.json 见 hl-dashboard-pairs.example.json
+hl-trader --config /固定路径/pairs.json dashboard --pair nbis-crwv --json
+hl-trader --config /固定路径/pairs.json dashboard --announcements --json
+```
+
+- `--config` 在这个命令下是 **JSON pair 配置**；其他命令仍是原 TOML 交易配置。
+- `--pair <id>` 与 `--announcements` 二选一（clap 互斥），`--json` 必带。
+- 本命令使用独立配置解析器和只读 info 客户端：**不通过交易 load_config、不实例化
+  签名器、不读 agent 私钥/receipt_dir、不获取交易锁**，只发 `/info` 类请求。
+- 交易 Adapter 与 `NETWORK` 常量仍为测试网；本命令的 mainnet/testnet 来自 pair 配置
+  并映射固定官方 URL，无任意 URL。HIP-3 合约用完整标识（如 `xyz:NBIS`）精确匹配，
+  不会简化成 `NBIS`；`userFunding` 按官方 API 不带 dex 参数。
+- 输出契约见 `stock_data/docs/HYPERLIQUID_MULTIPAIR_PLAN.md` §5.3（`schema_version: 2`、
+  固定五区块、数值一律十进制字符串、分源时间与诊断）。`unlock_anchors=null` 的 pair
+  输出 `blocks.unlocks=null`；账户地址为 `null` 的 pair 只展示公开行情，账户/仓位块
+  明确 unavailable（`items=null`，不是空数组）。
+- 退出码：`0` 成功（区块级降级不算失败）；`1` 配置非法/进程失败/采集期配置被替换
+  （后端转 503）；`2` 未知或已停用 pair id（后端转 404）。stdout 只含一行 JSON，
+  日志与诊断走 stderr。
+
+JSON pair 配置字段（两侧同一份文件，服务端 `STOCK_HL_PAIRS_CONFIG` 指向）：
+
+| 字段 | 说明 |
+|---|---|
+| `config_version` | 固定 `1`；拒绝未知字段、重复 JSON 键、重复 pair id |
+| `pairs[].id` | `^[a-z0-9]+(?:-[a-z0-9]+)*$`，≤64，全局唯一 |
+| `enabled` | 布尔，必须显式；`false` 不出目录、CLI 按 404 处理 |
+| `network` | 仅 `mainnet`/`testnet`，固定 URL 映射，禁止自动回退 |
+| `dex` | HIP-3 DEX 名；空串 = 原生。`coins` 必须与 dex 前缀一致 |
+| `coins` | 恰好两个不同的完整永续标识，顺序即比价分子/分母 |
+| `account_address` | 合法非零 EVM 地址（统一小写）或显式 `null`；空串/占位/零地址是错误 |
+| `unlock_anchors` | `null` = 不适用；`[]` = 适用未配置；条目字段 `date_utc/label/source_url/verified_utc` |
+
+`config_revision` 为配置原始字节的 SHA-256（小写 hex）；采集结束会重读文件比对，
+中途被替换则明确报错（非 0），旧快照不会进入新配置缓存。
+
 pair 语义（详见 PHASE2_PLAN.md §2/§3）：
 
 - 顺序执行：先 HYPE 多腿，确认全成再 BTC 空腿；两腿不原子。

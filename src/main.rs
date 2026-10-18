@@ -4,6 +4,7 @@
 //! 下单和撤单必须显式加 --execute，且需要用户另外授权测试网联调。
 
 mod config;
+mod dashboard;
 mod hyperliquid;
 mod intel;
 mod pair;
@@ -124,6 +125,18 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
+    /// 多 pair 主网只读看板（v2）：--config 是 JSON pair 配置；只读、不装载私钥。
+    Dashboard {
+        /// 采集指定 pair id 的快照；与 --announcements 二选一。
+        #[arg(long, conflicts_with = "announcements")]
+        pair: Option<String>,
+        /// 只输出平台公告块（复用 v1 结构化采集）；与 --pair 二选一。
+        #[arg(long, conflicts_with = "pair")]
+        announcements: bool,
+        /// 必须显式给出：输出单行 JSON（stdout 唯一内容）。
+        #[arg(long, required = true)]
+        json: bool,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -164,6 +177,11 @@ async fn main() -> ExitCode {
         }
         Commands::Open { notional, execute } => cmd_open(&config_path, notional, execute).await,
         Commands::Close { execute } => cmd_close(&config_path, execute).await,
+        Commands::Dashboard {
+            pair,
+            announcements,
+            json: _,
+        } => cmd_dashboard_v2(&config_path, pair, announcements).await,
         Commands::Margin {
             coin,
             leverage,
@@ -528,6 +546,69 @@ async fn cmd_status_json(config_path: &std::path::Path) -> ExitCode {
     };
     println!("{line}");
     ExitCode::from(EXIT_OK)
+}
+
+/// `dashboard`（v2 多 pair 主网只读看板；多 pair 方案 §5.1）。
+///
+/// 退出码：0 = 快照成功；1 = 配置错误/进程失败（Python 转 503）；
+/// 2 = 未知或已停用 pair id（Python 转 404）。stdout 只含一行 JSON。
+async fn cmd_dashboard_v2(
+    config_path: &std::path::Path,
+    pair_id: Option<String>,
+    announcements: bool,
+) -> ExitCode {
+    if announcements {
+        let snapshot = dashboard::snapshot::collect_announcements().await;
+        return match dashboard::snapshot::announcements_json(&snapshot) {
+            Ok(line) => {
+                println!("{line}");
+                ExitCode::from(EXIT_OK)
+            }
+            Err(e) => runtime_err(format!("快照序列化失败: {e}")),
+        };
+    }
+
+    let Some(pair_id) = pair_id else {
+        return usage_err("dashboard 需要 --pair <id> 或 --announcements 之一");
+    };
+    let cfg = match dashboard::config::load(config_path) {
+        Ok(c) => c,
+        // 配置非法 → 进程失败类（1），由后端转 503，不继续服务旧配置。
+        Err(e) => return runtime_err(format!("看板配置错误: {e}")),
+    };
+    let Some(pair) = cfg.enabled_pair(&pair_id) else {
+        // 未知/停用 pair：404 语义（2），与进程失败（1）区分。
+        eprintln!("错误: 未知或已停用的 pair id \"{pair_id}\"");
+        return ExitCode::from(EXIT_USAGE);
+    };
+
+    let client = dashboard::client::InfoClient::new(pair.descriptor.network);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let snapshot = dashboard::snapshot::collect_pair(&client, pair, &cfg.revision, now_ms).await;
+
+    // 采集结束重读配置：文件在中途被替换必须明确报错重试（旧快照不进新配置缓存）。
+    match dashboard::config::revision_at(config_path) {
+        Ok(final_revision) if final_revision == cfg.revision => {}
+        Ok(_) => {
+            eprintln!("失败: 配置已变更，请重试");
+            return ExitCode::from(EXIT_ERROR);
+        }
+        Err(e) => {
+            eprintln!("失败: 配置已变更或不可读，请重试（{e}）");
+            return ExitCode::from(EXIT_ERROR);
+        }
+    }
+
+    match dashboard::snapshot::pair_snapshot_json(&snapshot) {
+        Ok(line) => {
+            println!("{line}");
+            ExitCode::from(EXIT_OK)
+        }
+        Err(e) => runtime_err(format!("快照序列化失败: {e}")),
+    }
 }
 
 async fn cmd_open(

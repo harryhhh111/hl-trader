@@ -30,3 +30,5 @@ Thumbs.db
 
 # 本机看板运行配置（含机器相关绝对路径，不进版本库）
 hl-trader-dashboard.toml
+# v2 多 pair 看板运行配置（含真实主网账户地址，由服务端文件维护）
+hl-dashboard-pairs.json

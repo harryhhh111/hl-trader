@@ -891,7 +891,8 @@ fn collect_unlocks(cfg: &DashboardConfig, today: NaiveDate, generated_at: String
 
 // ---------- 块 5：官方动态 ----------
 
-async fn collect_announcements(base: &str) -> AnnouncementsBlock {
+/// v1/v2 共用的公告块采集；v2（`dashboard --announcements --json`）直接复用。
+pub(crate) async fn collect_announcements(base: &str) -> AnnouncementsBlock {
     let mut diagnostics = Vec::new();
     let mut items: Vec<AnnouncementItem> = Vec::new();
     let mut sources_ok = Vec::new();
