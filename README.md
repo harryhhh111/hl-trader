@@ -8,7 +8,6 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 
 - 历史设计方案：[MVP_PLAN.md](docs/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/PHASE2_PLAN.md)。
 - v2 验收记录与待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
-- 历史过程材料：[MONITORING_PLAN.md](docs/archive/MONITORING_PLAN.md)、[HYPERLIQUID_V2_REMEDIATION_PLAN.md](docs/archive/HYPERLIQUID_V2_REMEDIATION_PLAN.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 构建
@@ -59,7 +58,7 @@ hl-trader margin --coin BTC --leverage 3 --execute  # 设置某币种为全仓(c
 - 资金费分别展示两腿当前小时费率、简单年化、日净收付估算，以及过去 48 小时实际净收付和最近 3 笔记录；单个来源失败不隐藏其他有效数据。
 - HYPE/BTC 使用截至昨日 UTC 的连续 30 个共同收盘日，标注收盘日期；缺日或数据过期时显示不可用。
 - 解锁展示配置中未来 7 天的全部锚点（含当天，去重），附来源和人工核实日期；没有配置就明确提示，实际申领另标注未核实。
-- 官方动态读取官方 Telegram 公告与 API 更新频道的公开预览，每个频道最多展示 3 条，附发布时间、原文链接、查询时间。无需登录或 token；超时、页面变化、过旧公告明确提示。
+- 官方动态读取官方 Telegram [公告频道](https://t.me/hyperliquid_announcements)与 [API 更新频道](https://t.me/hyperliquid_api)的公开预览，每个频道最多展示 3 条，附发布时间、原文链接、查询时间。无需登录或 token；超时、页面变化、过旧公告明确提示。
 - 行情和账户仍属于测试网；公开公告可能涉及不同网络，以原文为准。看板每次按需查询，不保存日报或后台推送。
 
 ### status --json（结构化快照，供 Web 看板调用）
@@ -205,6 +204,14 @@ cargo test
 测试基于本地 mock HTTP、临时文件和子进程锁，不访问主网/测试网，不需要真实私钥。
 覆盖补偿未知后停止、落盘失败、残仓再次平仓、中断订单核对、最终持仓验证及分页边界。
 本轮只完成离线检查，第二阶段测试网联调尚未验收。
+
+手动公开来源检查不属于默认离线套件；它只读取公告网站，不加载交易配置：
+
+```sh
+cargo test intel::announcements::tests::public_sources_smoke -- --ignored --nocapture
+```
+
+公开预览不等同于完整历史 API；抓取失败不代表没有公告更新。
 
 ## 风险与已知限制（如实记录，docs/PHASE2_PLAN.md §8）
 
