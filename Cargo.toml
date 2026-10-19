@@ -3,7 +3,7 @@ name = "hl-trader"
 version = "0.1.0"
 edition = "2024"
 description = "Hyperliquid testnet minimal CLI: market/account/order/status/cancel"
-license = "LicenseRef-Custom" # 项目自身许可证待用户确认，见 docs/MVP_PLAN.md §2
+license = "LicenseRef-Custom" # 项目自身许可证待用户确认，见 docs/archive/MVP_PLAN.md §2
 
 [dependencies]
 hypersdk = "=0.3.0"

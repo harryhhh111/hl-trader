@@ -6,9 +6,9 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 
 ## 文档
 
-- 历史设计方案：[MVP_PLAN.md](docs/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/PHASE2_PLAN.md)。
-- v2 验收记录与待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
+- 当前 v2 验收状态与上线前待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
+- 历史设计方案（仅用于追溯）：[MVP_PLAN.md](docs/archive/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/archive/PHASE2_PLAN.md)。
 
 ## 构建
 
@@ -116,10 +116,11 @@ hl-trader --config /固定路径/pairs.json dashboard --announcements --json
 - 交易 Adapter 与 `NETWORK` 常量仍为测试网；本命令的 mainnet/testnet 来自 pair 配置
   并映射固定官方 URL，无任意 URL。HIP-3 合约用完整标识（如 `xyz:NBIS`）精确匹配，
   不会简化成 `NBIS`；`userFunding` 按官方 API 不带 dex 参数。
-- 输出契约见 `stock_data/docs/HYPERLIQUID_MULTIPAIR_PLAN.md` §5.3（`schema_version: 2`、
-  固定五区块、数值一律十进制字符串、分源时间与诊断）。`unlock_anchors=null` 的 pair
-  输出 `blocks.unlocks=null`；账户地址为 `null` 的 pair 只展示公开行情，账户/仓位块
-  明确 unavailable（`items=null`，不是空数组）。
+- 输出契约为 `schema_version: 2`、固定五区块、数值一律十进制字符串、分源时间与诊断；
+  完整 DTO 由 `src/dashboard/snapshot.rs` 定义，Web 契约测试实读
+  `stock_data/tests/fixtures/hyperliquid/` 中由 Rust 生成的共享 fixture。
+  `unlock_anchors=null` 的 pair 输出 `blocks.unlocks=null`；账户地址为 `null` 的 pair
+  只展示公开行情，账户/仓位块明确 unavailable（`items=null`，不是空数组）。
 - 退出码：`0` 成功（区块级降级不算失败）；`1` 配置非法/进程失败/采集期配置被替换
   （后端转 503）；`2` 未知或已停用 pair id（后端转 404）。stdout 只含一行 JSON，
   日志与诊断走 stderr。
@@ -140,7 +141,7 @@ JSON pair 配置字段（两侧同一份文件，服务端 `STOCK_HL_PAIRS_CONFI
 `config_revision` 为配置原始字节的 SHA-256（小写 hex）；采集结束会重读文件比对，
 中途被替换则明确报错（非 0），旧快照不会进入新配置缓存。
 
-pair 语义（详见 docs/PHASE2_PLAN.md §2/§3）：
+pair 语义（详见 docs/archive/PHASE2_PLAN.md §2/§3）：
 
 - 顺序执行：先 HYPE 多腿，确认全成再 BTC 空腿；两腿不原子。
 - IOC 腿单「零成交且订单已终结」（totalSz=0/avgPx=0）是交易所确认的已知结局，与拒单同等
@@ -180,7 +181,7 @@ allowed for this asset"）时接受该腿逐仓并打印警告，自担单腿独
 要求全仓。历史成交和资金费分页去重；
 成交按本 pair 的订单 ID 与已确认数量核对，缺失记录、分页无法推进或达到历史保留上限时不声称完整核算。
 
-端点硬编码为 `https://api.hyperliquid-testnet.xyz`，不支持主网、不允许任意 URL 覆盖、不跟随重定向。
+交易命令端点硬编码为 `https://api.hyperliquid-testnet.xyz`，不支持主网写操作、不允许任意 URL 覆盖、不跟随重定向；v2 `dashboard` 的独立只读网络边界见上文。
 
 ## 语义与退出码
 
@@ -203,7 +204,7 @@ cargo test
 
 测试基于本地 mock HTTP、临时文件和子进程锁，不访问主网/测试网，不需要真实私钥。
 覆盖补偿未知后停止、落盘失败、残仓再次平仓、中断订单核对、最终持仓验证及分页边界。
-本轮只完成离线检查，第二阶段测试网联调尚未验收。
+交易 pair 的第二阶段测试网联调仍未验收；v2 主网只读看板的离线验收基线与上线前待办见[验收状态](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 
 手动公开来源检查不属于默认离线套件；它只读取公告网站，不加载交易配置：
 
@@ -213,7 +214,7 @@ cargo test intel::announcements::tests::public_sources_smoke -- --ignored --noca
 
 公开预览不等同于完整历史 API；抓取失败不代表没有公告更新。
 
-## 风险与已知限制（如实记录，docs/PHASE2_PLAN.md §8）
+## 风险与已知限制（如实记录，docs/archive/PHASE2_PLAN.md §8）
 
 - **无自动再平衡**：两腿名义随价格漂移，极端时 pair 退化近似单腿敞口；看板显示漂移%，
   由人决定是否 `close` 后重新 `open`（往返 taker 成本 ≈ 4×每腿名义比例×0.045% 权益）。
@@ -227,6 +228,6 @@ cargo test intel::announcements::tests::public_sources_smoke -- --ignored --noca
 
 ## 许可与来源
 
-- 本项目自身许可证：**待确认**（见 `docs/MVP_PLAN.md` §2，未默认指定 MIT/AGPL）。
+- 本项目自身许可证：**待确认**（见 `docs/archive/MVP_PLAN.md` §2，未默认指定 MIT/AGPL）。
 - 协议签名与类型复用社区 Rust SDK [`infinitefield/hypersdk`](https://github.com/infinitefield/hypersdk)
   （MPL-2.0，官方文档收录）。第三方许可明细见 `THIRD_PARTY.md`。

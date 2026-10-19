@@ -1,6 +1,6 @@
 # 第三方依赖与许可记录
 
-本文件记录 hl-trader 的依赖来源与许可证（docs/MVP_PLAN.md §2 要求）。
+本文件记录 hl-trader 的依赖来源与许可证（docs/archive/MVP_PLAN.md §2 要求）。
 依赖版本由 `Cargo.lock` 固定；重新生成完整清单可用 `cargo tree` 或 `cargo about`。
 
 ## 直接依赖
@@ -9,7 +9,7 @@
 |---|---|---|---|
 | hypersdk (infinitefield/hypersdk) | 0.3.0 | **MPL-2.0** | Hyperliquid 协议类型、EIP-712 签名（alloy）、HTTP 客户端 |
 | clap | 4.6.7 | MIT OR Apache-2.0 | CLI 解析 |
-| rust_decimal | 1.40.x | MIT | 十进制定点金额/数量计算（不用二进制浮点） |
+| rust_decimal | 1.43.x | MIT | 十进制定点金额/数量计算（不用二进制浮点） |
 | serde / serde_json | 1.x | MIT OR Apache-2.0 | 回执与响应序列化 |
 | toml | 0.9.x | MIT OR Apache-2.0 | 配置文件 |
 | tokio | 1.x | MIT | 异步运行时 |
@@ -18,6 +18,7 @@
 | anyhow / thiserror | 1.x / 2.x | MIT OR Apache-2.0 / MIT OR Apache-2.0 | 错误处理 |
 | zeroize | 1.x | MIT OR Apache-2.0 | 私钥文件读取后的内存清零 |
 | scraper | 0.27.0（固定版本，无默认 features） | ISC | 解析官方 Telegram 公开预览 HTML，提取原文链接与发布时间 |
+| sha2 | 0.10.x | MIT OR Apache-2.0 | 计算 pair 配置原始字节的 SHA-256（`config_revision`） |
 | httpmock（dev） | 0.8.3 | MIT | 离线 mock HTTP 测试服务器 |
 
 ## 关键传递依赖
@@ -50,7 +51,7 @@ crates.io 固定版本使用。
 
 ## 本项目自身许可证
 
-待用户确认（docs/MVP_PLAN.md §2，未默认指定 MIT 或 AGPL）。
+待用户确认（docs/archive/MVP_PLAN.md §2，未默认指定 MIT 或 AGPL）。
 
 ## 第二阶段执行流程参考核对（2026-10-15）
 
