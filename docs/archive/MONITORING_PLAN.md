@@ -1,10 +1,10 @@
 # 信息监控推进记录
 
-日期：2026-10-16。沿用 PHASE2_PLAN 的按需 `status` 看板；当前没有后台巡检或推送。
+日期：2026-10-16。沿用 [PHASE2_PLAN](../PHASE2_PLAN.md) 的按需 `status` 看板；当前没有后台巡检或推送。
 
 ## 分工与当前交付
 
-交易接口、签名、开平仓联调由 Kimi 推进。信息层位于 `src/intel.rs` 和 `src/intel/announcements.rs`，复用现有只读接口，不改变交易配置或状态。公告页 HTML 使用固定版本 scraper 解析，依赖及许可记录在 THIRD_PARTY.md。
+交易接口、签名、开平仓联调由 Kimi 推进。信息层位于 `src/intel.rs` 和 `src/intel/announcements.rs`，复用现有只读接口，不改变交易配置或状态。公告页 HTML 使用固定版本 scraper 解析，依赖及许可记录在 [THIRD_PARTY.md](../../THIRD_PARTY.md)。
 
 本轮已实现：
 

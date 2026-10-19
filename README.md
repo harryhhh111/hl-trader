@@ -1,8 +1,15 @@
 # hl-trader
 
-Hyperliquid **测试网**命令行工具。第一步（MVP）提供最小下单闭环；第二步实现 pair 策略执行器与看板（方案见 `MVP_PLAN.md`、`PHASE2_PLAN.md`）。
+Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及独立的 v2 多 pair 主网/测试网**只读看板**。
 
 **默认 dry-run**：不加 `--execute` 时，不加载私钥、不生成签名、不发送任何写请求。
+
+## 文档
+
+- 历史设计方案：[MVP_PLAN.md](docs/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/PHASE2_PLAN.md)。
+- v2 验收记录与待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
+- 历史过程材料：[MONITORING_PLAN.md](docs/archive/MONITORING_PLAN.md)、[HYPERLIQUID_V2_REMEDIATION_PLAN.md](docs/archive/HYPERLIQUID_V2_REMEDIATION_PLAN.md)。
+- 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 构建
 
@@ -134,7 +141,7 @@ JSON pair 配置字段（两侧同一份文件，服务端 `STOCK_HL_PAIRS_CONFI
 `config_revision` 为配置原始字节的 SHA-256（小写 hex）；采集结束会重读文件比对，
 中途被替换则明确报错（非 0），旧快照不会进入新配置缓存。
 
-pair 语义（详见 PHASE2_PLAN.md §2/§3）：
+pair 语义（详见 docs/PHASE2_PLAN.md §2/§3）：
 
 - 顺序执行：先 HYPE 多腿，确认全成再 BTC 空腿；两腿不原子。
 - IOC 腿单「零成交且订单已终结」（totalSz=0/avgPx=0）是交易所确认的已知结局，与拒单同等
@@ -199,7 +206,7 @@ cargo test
 覆盖补偿未知后停止、落盘失败、残仓再次平仓、中断订单核对、最终持仓验证及分页边界。
 本轮只完成离线检查，第二阶段测试网联调尚未验收。
 
-## 风险与已知限制（如实记录，PHASE2_PLAN §8）
+## 风险与已知限制（如实记录，docs/PHASE2_PLAN.md §8）
 
 - **无自动再平衡**：两腿名义随价格漂移，极端时 pair 退化近似单腿敞口；看板显示漂移%，
   由人决定是否 `close` 后重新 `open`（往返 taker 成本 ≈ 4×每腿名义比例×0.045% 权益）。
@@ -213,6 +220,6 @@ cargo test
 
 ## 许可与来源
 
-- 本项目自身许可证：**待确认**（见 `MVP_PLAN.md` §2，未默认指定 MIT/AGPL）。
+- 本项目自身许可证：**待确认**（见 `docs/MVP_PLAN.md` §2，未默认指定 MIT/AGPL）。
 - 协议签名与类型复用社区 Rust SDK [`infinitefield/hypersdk`](https://github.com/infinitefield/hypersdk)
   （MPL-2.0，官方文档收录）。第三方许可明细见 `THIRD_PARTY.md`。

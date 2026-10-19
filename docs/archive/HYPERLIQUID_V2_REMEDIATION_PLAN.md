@@ -1,12 +1,12 @@
 # Hyperliquid v2 看板整改执行方案
 
 > 日期：2026-10-19。
-> 状态：整改方案，尚未实施。用户将交给 Kimi 执行。
+> 状态：历史整改方案；代码整改与离线验收已完成，当前状态见验收记录。真实账户、真实浏览器、部署权限与发布验收仍按验收记录待办。
 > 本轮目标：修复验收记录 R1–R9，补齐回归用例、共享 fixture 和部署说明，交付两个仓库的修复提交及验证结果。
 
 ## 1. 依据与范围
 
-- 问题与复现证据：[HYPERLIQUID_V2_ACCEPTANCE.md](HYPERLIQUID_V2_ACCEPTANCE.md)。编号沿用，不重新编号。
+- 问题与复现证据：[HYPERLIQUID_V2_ACCEPTANCE.md](../HYPERLIQUID_V2_ACCEPTANCE.md)。编号沿用，不重新编号。
 - 产品与字段契约：[/home/vinci/projects/stock_data/docs/HYPERLIQUID_MULTIPAIR_PLAN.md](/home/vinci/projects/stock_data/docs/HYPERLIQUID_MULTIPAIR_PLAN.md)。
 - 当前基线：hl-trader `b48f898`；stock_data `3ce1b26`。当前机器 `STOCK_MARKETS=US`。
 - Kimi 已说明前一轮仅阅读和测试，尚未修复。不得把这两个提交或既有测试通过结果作为整改完成凭据。

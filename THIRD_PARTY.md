@@ -1,6 +1,6 @@
 # 第三方依赖与许可记录
 
-本文件记录 hl-trader 的依赖来源与许可证（MVP_PLAN §2 要求）。
+本文件记录 hl-trader 的依赖来源与许可证（docs/MVP_PLAN.md §2 要求）。
 依赖版本由 `Cargo.lock` 固定；重新生成完整清单可用 `cargo tree` 或 `cargo about`。
 
 ## 直接依赖
@@ -50,7 +50,7 @@ crates.io 固定版本使用。
 
 ## 本项目自身许可证
 
-待用户确认（MVP_PLAN §2，未默认指定 MIT 或 AGPL）。
+待用户确认（docs/MVP_PLAN.md §2，未默认指定 MIT 或 AGPL）。
 
 ## 第二阶段执行流程参考核对（2026-10-15）
 
