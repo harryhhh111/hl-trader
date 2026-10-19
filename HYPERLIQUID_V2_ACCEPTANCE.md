@@ -143,3 +143,35 @@ ratios map 在 90 天展示循环内才逐日填充。虽然客户端拉取 121 
 - 两个真实主网公开地址尚未由用户提供并配置，未做主网只读数据对照。
 - 当前环境没有 Chromium/Firefox/Playwright/Puppeteer，可执行页面渲染回归已完成，但真实浏览器桌面/移动端交互与截图尚未完成。
 - 未发布、未重启服务。代码与离线整改结果不能表述为真实数据验收或上线完成。
+
+## 2026-10-19 独立复核：主要修复有效，异常类型降级仍需收尾
+
+实际验收版本：hl-trader `63f3c14e800cdb59476064a16d08e38f0989f057`；stock_data `f23962a1fe096e539b023de0c7fdd3083f058700`。后者比上述交付清单新增一个 v1 校验与隔离文档提交。本次未修改业务代码，未发布或推送。
+
+### 已复跑通过
+
+- Rust：154 通过、0 失败、1 个既有 live smoke 忽略；fmt 与 Clippy（offline、all-targets、`-D warnings`）通过。
+- Python：三份 Hyperliquid 测试文件 165 通过；新增提交使数量比交付清单增加 56。
+- 前端：身份检查 9 项、QueryObserver/刷新顺序 4 项、页面静态渲染 3 项均通过；TypeScript 与 Vite 生产构建通过，产物仅写入 `/tmp/hl-acceptance-build-20261019`。
+- 两份共享快照已被 Python 与页面测试实读；另行比较校验前后内容，两份均保持不变，没有通过静默降级来掩盖契约不兼容。
+- R1/R2/R3/R5/R6/R7/R8 的本轮修复和对应回归有效；R4 原解锁崩溃与 R9 原资金费窗口复现已修复，但块级异常类型处理仍不完整。
+
+### 尚存问题（P2）：坏区块可能导致整份快照 503
+
+1. **v2 合约字段先做集合成员判断，缺少字符串类型检查。** `stock_data/web/services/hyperliquid_pairs_service.py:374` 与 `:455` 分别对持仓行和资金费明细的 `coin` 直接执行 set 成员判断。将共享 NBIS/CRWV fixture 中任一行 `coin` 改为 `[]`，校验器抛出 `TypeError: unhashable type: 'list'`；真实路由返回整份快照 503，其他有效区块无法展示。应先验证 coin 为字符串，再判断合约归属；错误应进入完整的单块 unavailable DTO。
+2. **v1 非数组 diagnostics 被直接迭代。** `stock_data/web/services/hyperliquid_service.py:183` 对 `diagnostics=1` 或 `true` 执行列表推导，抛出 TypeError；旧看板路由同样返回整份 503。应将不合法的 diagnostics 判为该块校验失败，不遍历任意 JSON 值，也不将空对象等非法类型默认为正常空数组。
+
+额外 HTTP 验收用例保存在本机 `/tmp/test_hl_acceptance_remaining.py`（临时文件，未提交）：v2 持仓 coin、v2 收付 coin、v1 diagnostics 共 **3 项失败**，均断言有效的其他区块应保留、接口应返回 200，实际为 503。使用本地 fixture/mock，不访问真实账户。
+
+因此本轮结论是主要修复与现有离线回归通过，尚不能将全部异常降级验收关闭。补齐上述类型检查，并将三个 HTTP 复现纳入正式回归后再收尾。真实主网账户对照、真实浏览器桌面/移动端交互、部署身份权限与发布验收仍未执行，不在此次通过范围内。
+
+## 2026-10-19 异常类型降级整改收尾
+
+修复提交：stock_data `b0dae6197081ccfa41c8d42830969f586f06046c`；hl-trader 业务代码仍为 `63f3c14e800cdb59476064a16d08e38f0989f057`，本轮无需改动。
+
+- v2 持仓与资金费收付明细先检查 `coin` 为字符串，再检查合约归属。`coin=[]` 现在只将对应区块替换为完整 unavailable DTO，接口返回 200，其他有效区块保持不变。
+- v1 `diagnostics` 不是字符串数组时直接判为该区块校验失败，不再迭代任意 JSON 标量，也不再把空对象或非字符串数组成员静默转换成正常诊断；降级区块保留完整 v1 字段。
+- 三个临时 HTTP 复现已迁入正式回归：`test_bad_coin_degrades_only_affected_block_over_http` 实读共享 NBIS/CRWV fixture 覆盖持仓和资金费两块，`test_v1_invalid_diagnostics_degrades_only_affected_block_over_http` 覆盖数字、布尔、空对象和非字符串数组。用例同时断言完整降级结构、诊断及其他区块不变；原始 `/tmp/test_hl_acceptance_remaining.py` 三项也已复跑通过。
+- 全量离线回归：Python 三份 Hyperliquid 测试文件 **171 通过、0 失败**；Rust **154 通过、0 失败、1 个既有 live smoke 忽略**，fmt 与 Clippy 通过；前端 **16 通过、0 失败**，TypeScript 与 Vite 生产构建通过。
+
+上述两项 P2 的代码与离线 HTTP 回归至此关闭。本轮仍未读取私钥、下单、重启服务、发布或推送；真实主网账户对照、真实浏览器桌面/移动端交互、部署身份权限与发布验收仍待完成，不能据此声明上线验收通过。
