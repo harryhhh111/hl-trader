@@ -17,8 +17,8 @@
 ## 最新离线回归基线（2026-10-19）
 
 - hl-trader `50dab22`：`cargo fmt --check`、`cargo clippy --offline --all-targets -- -D warnings` 通过；`cargo test --offline` **154 通过、0 失败、1 个既有 live smoke 忽略**。
-- stock_data `5a39dd8`：三份正式 Hyperliquid Python 测试 **171 通过、0 失败**；原始 3 个 HTTP 复现另行通过，合计 **174 通过、0 失败**。
-- 同一 stock_data 提交的前端 Hyperliquid 回归 **24 通过、0 失败**；TypeScript 与 Vite 生产构建通过。新增白话诊断映射后，前端用例数从此前基线的 16 增至 24。
+- stock_data `914a3d8`：三份正式 Hyperliquid Python 测试 **171 通过、0 失败**；原始 3 个 HTTP 复现另行通过，合计 **174 通过、0 失败**。
+- 同一 stock_data 提交的前端 Hyperliquid 回归 **26 通过、0 失败**；TypeScript 与 Vite 生产构建通过。新增白话诊断映射和两腿方向摘要后，前端用例数从最初基线的 16 增至 26；方向摘要现在按配置顺序直接展示“谁多谁空”，不再只显示“两腿反向”。
 - 共享 Rust fixture 继续被 Python 与前端测试实读。本轮所有离线测试不访问真实账户、不读取私钥、不发送订单。
 
 完整缺陷描述、R1–R9 修复提交映射和各轮复验记录见[历史验收档案](archive/HYPERLIQUID_V2_ACCEPTANCE_HISTORY.md)。
