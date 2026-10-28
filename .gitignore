@@ -32,3 +32,23 @@ Thumbs.db
 hl-trader-dashboard.toml
 # v2 多 pair 看板运行配置（含真实主网账户地址，由服务端文件维护）
 hl-dashboard-pairs.json
+
+# 独立 Web 应用本地环境与构建产物（锁文件保留）
+/.venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/playwright-report/
+/frontend/test-results/
+
+# 运行状态、浏览器产物及含业务数据的迁移包
+/.runtime/
+/.tmp/
+/sessions/
+/bundles/
+/baseline/
+/rollback/
+*.bundle/

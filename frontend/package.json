@@ -1,0 +1,27 @@
+{
+  "name": "hl-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "test:unit": "esbuild src/lib/api/client.test.ts --bundle --platform=node --format=esm --outfile=/tmp/hl-app-client.test.mjs && node --test /tmp/hl-app-client.test.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.56.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.5.4",
+    "vite": "^8.3.5"
+  }
+}

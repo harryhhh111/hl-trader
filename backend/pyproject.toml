@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hl-app"
+version = "0.1.0"
+description = "Independent Hyperliquid, watchlist and news application"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.104,<1",
+  "psycopg2-binary>=2.9,<3",
+  "uvicorn>=0.24,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx>=0.27,<1",
+  "pytest>=8,<9",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hl_app*"]
+
+[tool.setuptools.package-data]
+hl_app = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "db: requires an explicitly configured disposable PostgreSQL database",
+  "live: accesses external services and is never part of default regression",
+]
+addopts = "--strict-markers"

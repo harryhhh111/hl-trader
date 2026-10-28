@@ -49,6 +49,21 @@ crates.io 固定版本使用。
   以 crates.io 源码为准）。
 - cloid 为 128 位（0x + 32 个 hex 字符）。
 
+## 独立 Web 应用新增来源与依赖
+
+功能代码从同用户项目 `stock_data`（固定来源提交 `cc62434d126cdfc1dc40456f430d943f7d40d7cd`）按 `docs/migration/SOURCE_MAP.md` 逐项迁移；源文件已有声明必须保留，不据此改变本项目自身许可证。
+
+| 依赖/来源 | 许可证 | 用途 |
+| --- | --- | --- |
+| FastAPI | MIT | 独立 HTTP API |
+| uvicorn | BSD-3-Clause | 单进程 ASGI 服务 |
+| psycopg2 / psycopg2-binary | LGPL-3.0-or-later（含开源使用例外说明） | PostgreSQL 参数化访问、迁移和协调锁 |
+| React / React DOM / React Router | MIT | 独立页面与路由 |
+| TanStack React Query | MIT | 前端请求状态与缓存 |
+| Vite / @vitejs/plugin-react / esbuild / TypeScript | MIT / MIT / MIT / Apache-2.0 | 前端构建与 Node 测试打包 |
+
+精确安装版本见 `backend/requirements.lock` 和 `frontend/package-lock.json`。后续迁移的 ECharts 等依赖在实际引入时补充。
+
 ## 本项目自身许可证
 
 待用户确认（docs/archive/MVP_PLAN.md §2，未默认指定 MIT 或 AGPL）。

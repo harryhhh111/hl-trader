@@ -6,9 +6,39 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 
 ## 文档
 
+- 独立 Web 应用迁移执行方案（供 Kimi 按阶段实施）：[INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md](docs/INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md)。
 - 当前 v2 验收状态与上线前待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
 - 历史设计方案（仅用于追溯）：[MVP_PLAN.md](docs/archive/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/archive/PHASE2_PLAN.md)。
+- 独立应用迁移记录：[来源清单](docs/migration/SOURCE_MAP.md)、[执行进展](docs/migration/PROGRESS.md)。
+
+## 独立 Web 应用（迁移实施中）
+
+需要 Python 3.11+、Node.js 22+ 和独立 PostgreSQL。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r backend/requirements.lock
+.venv/bin/python -m pip install --no-deps -e backend
+.venv/bin/python -m hl_app.db migrate
+.venv/bin/python -m hl_app
+
+cd frontend
+npm ci
+npm run test:unit
+npm run build
+cd ..
+
+cargo fmt --check
+cargo test --offline
+cargo clippy --offline --all-targets -- -D warnings
+.venv/bin/python -m pytest -c backend/pyproject.toml backend/tests -m 'not db and not live' -q
+# 仅显式指定一次性测试库后执行：
+.venv/bin/python -m pytest -c backend/pyproject.toml backend/tests -m db -q
+```
+
+Web 固定单进程，启动时持有 PostgreSQL 生命周期锁，不自动建表或启动采集；新库业务状态默认为 maintenance。后端测试、前端开发服务器和 Rust CLI 均为本机开发入口，不代表部署或真实来源验收。
 
 ## 构建
 
