@@ -79,4 +79,27 @@ export const watchlistApi = {
       method: "POST",
       body: JSON.stringify({ market, codes }),
     }),
+  announcements: (days = 7) => apiFetch<import("@/lib/types/watchlist").AnnouncementSummary>(`/api/v1/watchlist/announcements?days=${days}`),
+  itemAnnouncements: (itemId: number, params: { days?: number; offset?: number; limit?: number; source?: string } = {}) => {
+    const query = new URLSearchParams({
+      days: String(params.days ?? 90),
+      offset: String(params.offset ?? 0),
+      limit: String(params.limit ?? 20),
+      source: params.source ?? "all",
+    });
+    return apiFetch<import("@/lib/types/watchlist").AnnouncementDetail>(`/api/v1/watchlist/${itemId}/announcements?${query}`);
+  },
+};
+
+export const newsApi = {
+  feed: (params: { date?: string; stock?: string; kind?: string; offset?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.date) query.set("date", params.date);
+    if (params.stock) query.set("stock", params.stock);
+    query.set("kind", params.kind ?? "all");
+    query.set("offset", String(params.offset ?? 0));
+    query.set("limit", String(params.limit ?? 200));
+    return apiFetch<import("@/lib/types/news").NewsFeed>(`/api/v1/news/feed?${query}`);
+  },
+  pinned: () => apiFetch<import("@/lib/types/news").NewsPinned>("/api/v1/news/pinned"),
 };

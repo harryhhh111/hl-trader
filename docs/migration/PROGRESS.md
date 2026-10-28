@@ -44,7 +44,7 @@
 
 ## C：关注股与行情
 
-状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 B 提交 `3cf306d3d4854faffaae6307399faff183056987`。
+状态：完成，阶段提交 `bc97012110e79f7ece36eb0bf7b8e096a3bc5249`。阶段起点 HEAD 为 B 提交 `3cf306d3d4854faffaae6307399faff183056987`。
 
 已落地：最小 securities/watchlist/daily_quotes schema、统一代码与显式行情源映射、启用项列表、白名单元数据 PATCH、只查库的三市场行情、近 20 日断线走势、腾讯单证券未复权日线采集及 90/365 日有界回补。没有 create/delete/search/analyzer API 或入口，没有 stock_info、全市场扫描和视图刷新依赖。
 
@@ -55,4 +55,19 @@
 - 前端完整单测 33 项（新增关注股表格 1 项）及生产构建通过；页面不含新增、移除、搜索或分析入口。
 - 修复迁移验证发现的 PostgreSQL 兼容问题：不用 `isfinite(double precision)`，改为显式 NaN/Infinity 检查；迁移连接在成功和异常时均确定性关闭，避免 traceback 保留会话锁。修复后整套 DB 用例无悬挂通过。
 
-未完成：US/A/HK 真实来源可达性、公告和 AI；真实网络采集未执行。C 阶段提交号在后续记录中补充。
+未完成：US/A/HK 真实来源可达性、公告和 AI；真实网络采集未执行。C 阶段提交号已补记于上文。
+
+## D：公告与资讯
+
+状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 C 提交 `bc97012110e79f7ece36eb0bf7b8e096a3bc5249`。
+
+已落地：来源注册、不可变 revision、首版多证券关联及公司级理由、check/gap/run/recovery、SEC submissions 与旧文件分页恢复、Nebius/Q4 IR、RSS/Atom 与 Finnhub 媒体适配、共享 SEC gate、公告摘要/详情、每日信息流折叠与重要性置顶。读取 API 只查库，不调用采集器或模型；非美股明确不支持。
+
+实际验证：
+
+- Python 离线套件：129 passed，32 deselected；覆盖 48 小时折叠边界、未知时间、多公司理由、SEC 时间精度、Nebius/Q4/Finnhub 适配及置顶窗口。
+- 在 `/tmp/hl-app-pg-D.eCrJLN` 临时 PostgreSQL 上运行 DB 套件：32 passed，129 deselected；覆盖 revision/关联继承、停用后不新增关联、失败 gap、非美股状态、SEC 分页预算不推进检查点及下一轮恢复。
+- SEC gate 使用四个真实本地进程和本机 HTTP mock 验证最多 2 次/秒；429 持久化冷却、协调失败零请求和任意外部 URL 拒绝均通过。
+- 前端 35 项单测及生产构建通过；新增每日资讯 2 项，公告摘要/详情、折叠公司标签和理由展示接入关注股与资讯页。
+
+未完成：真实 SEC/IR/媒体出口与既有来源状态调整、AI 和常驻 worker；未执行真实网络采集。D 阶段提交号在后续记录中补充。

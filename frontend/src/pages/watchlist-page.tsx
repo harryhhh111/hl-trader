@@ -6,11 +6,17 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Market } from "@/lib/types/common";
-import type { WatchItem, WatchQuote } from "@/lib/types/watchlist";
+import type { AnnouncementItem, AnnouncementSummary, WatchItem, WatchQuote } from "@/lib/types/watchlist";
 
 const markets: Market[] = ["US", "CN_HK", "CN_A"];
 const currency = { US: "USD", CN_HK: "HKD", CN_A: "CNY" };
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "请求失败";
+
+function announcementTime(item: AnnouncementItem) {
+  if (item.time_unknown) return `时间未知，发现于 ${item.first_observed_at ?? "—"}`;
+  if (item.date_only) return `${item.published_raw.slice(0, 10)}（仅日期）`;
+  return `${item.published_at ?? "—"}（${item.source_kind === "sec" ? "SEC 接收时间" : "发布时间"}）`;
+}
 
 function Sparkline({ quote }: { quote?: WatchQuote }) {
   if (quote?.status === "review_price_basis") return <span className="text-muted-foreground">价格口径待核对</span>;
@@ -45,6 +51,18 @@ export function WatchlistPage() {
   const [actionError, setActionError] = useState("");
   const itemsQuery = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list, retry: false });
   const items = itemsQuery.data ?? [];
+  const [annItem, setAnnItem] = useState<WatchItem | null>(null);
+  const [annSource, setAnnSource] = useState("all");
+  const [annOffset, setAnnOffset] = useState(0);
+  const annQuery = useQuery({ queryKey: ["watchlist-announcements", 7], queryFn: () => watchlistApi.announcements(7), staleTime: 60_000, retry: 1 });
+  const annByItemId = new Map<number, AnnouncementSummary["items"][number]>();
+  annQuery.data?.items.forEach((entry) => annByItemId.set(entry.item_id, entry));
+  const annDetailQuery = useQuery({
+    queryKey: ["watchlist-announcement-detail", annItem?.id, annSource, annOffset],
+    queryFn: () => watchlistApi.itemAnnouncements(annItem!.id, { days: 90, offset: annOffset, limit: 20, source: annSource }),
+    enabled: annItem != null,
+    retry: 1,
+  });
   const quoteQueries = useQueries({ queries: markets.map((current) => {
     const codes = items.filter((item) => item.market === current).map((item) => item.stock_code).sort();
     return {
@@ -102,9 +120,10 @@ export function WatchlistPage() {
       {visible.length > 0 && (
         <div className="border rounded-lg bg-card overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left border-b">{["股票", "分组", "最新收盘价", "涨跌幅", "近20日", "行情日期", "关注理由", "操作"].map((heading) => <th key={heading} className="p-3">{heading}</th>)}</tr></thead>
+            <thead><tr className="text-left border-b">{["股票", "分组", "最新收盘价", "涨跌幅", "近20日", "行情日期", "官方公告", "关注理由", "操作"].map((heading) => <th key={heading} className="p-3">{heading}</th>)}</tr></thead>
             <tbody>{visible.map((item) => {
               const quote = quotes.get(`${item.market}:${item.stock_code}`);
+              const ann = annByItemId.get(item.id);
               return (
                 <tr key={item.id} className="border-b last:border-0 align-top">
                   <td className="p-3"><span className="font-medium">{item.stock_name}</span><div className="text-xs text-muted-foreground">{item.stock_code} · {item.market}</div></td>
@@ -113,6 +132,7 @@ export function WatchlistPage() {
                   <td className="p-3 min-w-40"><div>{quote?.change_pct == null ? "—" : `${quote.change_pct >= 0 ? "+" : ""}${quote.change_pct.toFixed(2)}%`}</div><div className="text-xs text-muted-foreground">{quote?.previous_quote_date && quote?.quote_date ? `${quote.previous_quote_date} → ${quote.quote_date}` : quote?.warning}</div></td>
                   <td className="p-3"><Sparkline quote={quote} /></td>
                   <td className="p-3 min-w-36"><div>{quote?.quote_date || "—"}</div>{quote?.stale && <span className="text-xs text-amber-600">行情滞后</span>}</td>
+                  <td className="p-3 min-w-36">{item.market !== "US" ? <span className="text-xs text-muted-foreground">该市场未接入公告源</span> : <button type="button" className="text-left" onClick={() => { setAnnItem(item); setAnnOffset(0); }}><span>近 7 日 {ann?.count ?? "—"} 条</span><span className="block text-xs text-muted-foreground">{ann?.sources.find((source) => source.state !== "ok")?.message || "查看公告"}</span></button>}</td>
                   <td className="p-3 min-w-48 max-w-72 whitespace-pre-wrap">{item.note || <span className="text-muted-foreground">未填写</span>}</td>
                   <td className="p-3"><div className="flex gap-1">{item.research_url && <Button asChild variant="ghost" size="icon"><a href={item.research_url} target="_blank" rel="noopener noreferrer" aria-label="打开研究"><ExternalLink /></a></Button>}<Button variant="ghost" size="icon" aria-label={`编辑${item.stock_code}`} onClick={() => setEditor(item)}><Pencil /></Button></div></td>
                 </tr>
@@ -120,6 +140,18 @@ export function WatchlistPage() {
             })}</tbody>
           </table>
         </div>
+      )}
+      {annItem && (
+        <Card><CardContent className="pt-6 space-y-3">
+          <div className="flex items-center justify-between"><h2 className="font-semibold">{annItem.stock_name} · 官方公告</h2><Button variant="outline" size="sm" onClick={() => setAnnItem(null)}>关闭</Button></div>
+          <div className="space-y-1">{annDetailQuery.data?.sources.map((source, index) => <p key={index} className="text-xs text-muted-foreground">{source.kind} · {source.message}{source.open_gaps > 0 ? ` · ${source.open_gaps} 段缺口` : ""}</p>)}</div>
+          <div className="flex gap-2">{["all", "sec", "ir"].map((source) => <Button key={source} size="sm" variant={annSource === source ? "default" : "outline"} onClick={() => { setAnnSource(source); setAnnOffset(0); }}>{source === "all" ? "全部来源" : source.toUpperCase()}</Button>)}</div>
+          {annDetailQuery.isPending && <p>读取公告中…</p>}
+          {annDetailQuery.error && <p role="alert" className="text-destructive">{errorText(annDetailQuery.error)}</p>}
+          <ul className="space-y-2">{annDetailQuery.data?.items.map((item, index) => <li key={index} className="border-b pb-2"><a className="font-medium hover:text-primary" href={/^https?:\/\//.test(item.url) ? item.url : undefined} target="_blank" rel="noopener noreferrer">{item.title}</a><div className="text-xs text-muted-foreground">{item.source_kind.toUpperCase()} · {item.form_type} · {announcementTime(item)}{item.revision > 1 ? ` · 第 ${item.revision} 版` : ""}</div></li>)}</ul>
+          {annDetailQuery.data?.items.length === 0 && <p className="text-sm text-muted-foreground">窗口内无已采集公告记录</p>}
+          <div className="flex justify-between"><Button variant="outline" size="sm" disabled={annOffset === 0} onClick={() => setAnnOffset(Math.max(0, annOffset - 20))}>上一页</Button><Button variant="outline" size="sm" disabled={!annDetailQuery.data?.has_more} onClick={() => setAnnOffset(annOffset + 20)}>下一页</Button></div>
+        </CardContent></Card>
       )}
       {editor && (
         <Card><CardContent className="pt-6">

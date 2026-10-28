@@ -4,12 +4,9 @@ import { HyperliquidPage } from "@/pages/hyperliquid-page";
 import { HyperliquidPairPage } from "@/pages/hyperliquid-pair-page";
 import { LoginPage } from "@/pages/login-page";
 import { WatchlistPage } from "@/pages/watchlist-page";
+import { NewsPage } from "@/pages/news-page";
 import { Button } from "@/components/ui/button";
 import { sessionApi } from "@/lib/api/client";
-
-function Placeholder({ title }: { title: string }) {
-  return <div><h1 className="text-lg font-semibold">{title}</h1></div>;
-}
 
 function ProtectedLayout() {
   const session = useQuery({ queryKey: ["session"], queryFn: sessionApi.session, retry: false });
@@ -52,7 +49,7 @@ export default function App() {
         <Route path="/hyperliquid" element={<HyperliquidPage />} />
         <Route path="/hyperliquid/pairs/:pairId" element={<HyperliquidPairPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
-        <Route path="/news" element={<Placeholder title="每日资讯" />} />
+        <Route path="/news" element={<NewsPage />} />
         <Route path="/" element={<Navigate to="/hyperliquid" replace />} />
         <Route path="*" element={<Navigate to="/hyperliquid" replace />} />
       </Route>

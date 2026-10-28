@@ -43,6 +43,20 @@
 | 新增 DB 与采集生命周期合同 | `backend/tests/test_watchlist_db.py`：三市场同码、约束、权限、维护态、停用和幂等写入 |
 | `frontend/src/pages/watchlist-page.tsx` 与类型 | 目标同名页面保留筛选、表格、研究链接、编辑和断线 sparkline；删除搜索、新增/移除、分析链接和独立管理员登录 |
 
+## D 阶段测试追溯
+
+| 来源 | 目标与覆盖 |
+| --- | --- |
+| `scripts/watchlist_announcements.sql` | `backend/hl_app/migrations/004_announcements.sql`：保留来源/revision/check/gap/run/recovery；关联主键加入 market，并新增公司级 relation_reason |
+| `scripts/sec_request_gate.sql` 与 `core/sec_client.py` | `005_sec_request_gate.sql`、`collectors/sec_client.py`：同一把 DB advisory lock、2 次/秒、共享退避和协调失败拒绝；HTTP 改为最小标准库实现，不迁旧配置/requests worker |
+| `core/announcements/store.py` | `backend/hl_app/collectors/announcements.py`：自然键幂等、不可变 revision、首版关联、LLM 字段和恢复记录；写入关联前重新核对 enabled |
+| `core/announcements/sec_source.py` | `collectors/sources.py::parse_sec/collect_source`：submissions 与旧文件分页，最多两页/轮，partial 不推进检查点，cursor 下轮恢复 |
+| `core/announcements/ir_source.py` | `backend/hl_app/collectors/ir.py`：Nebius `__NEXT_DATA__` 与 Q4 JSON 适配；MU/WDC 等未验证来源仍只能由注册状态控制，不自动解除 blocked |
+| `core/announcements/media_source.py` | `collectors/sources.py::parse_feed/parse_finnhub`：RSS/Atom 和 Finnhub 身份、时间、摘要与媒体名；凭据只读显式环境 |
+| `web/services/announcements_service.py`、`news_service.py` | `backend/hl_app/services/announcements.py`、`news.py`：保留逻辑条目、48 小时折叠/置顶、未知时间、来源状态和 AI 降级；stock_info 改为本库 securities |
+| `tests/test_daily_news_baseline.py` 及公告/SEC/IR/媒体测试 | `backend/tests/test_news.py`、`test_source_adapters.py`、`test_announcements_db.py`、`test_sec_client.py`：保留核心边界并新增真实多进程 gate 与分页恢复 |
+| `frontend/src/pages/news-page.tsx`、`components/news/stock-relations.tsx` | 同名迁入；watchlist 增加公告摘要/详情，旧独立登录/采集提示改为目标配置 |
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。
