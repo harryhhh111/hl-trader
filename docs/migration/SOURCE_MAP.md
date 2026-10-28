@@ -32,6 +32,17 @@
 | 前端 `identity.test.ts`、`queries.test.ts`、`format.test.ts`、`hyperliquid-pages.test.tsx` | 同名迁入 `frontend/src/components/hyperliquid/` 和 `frontend/src/pages/`，共 26 项，完整覆盖 R2 与页面降级 |
 | 新增认证与进程合同 | `backend/tests/test_auth.py`、`test_auth_unit.py`、`test_hyperliquid_concurrency.py`、`test_lifecycle.py`；`frontend/src/pages/login-page.test.tsx` |
 
+## C 阶段测试追溯
+
+| 来源 | 目标与覆盖 |
+| --- | --- |
+| `web/services/watchlist_service.py` 的 `canonical_code`、行情摘要和元数据编辑 | `backend/hl_app/services/watchlist.py`：保留比较日期、缺值、35% 跳变和滞后语义；create/delete 不迁，新增 securities 与 enabled 边界 |
+| `core/fetchers/daily_quote.py::fetch_tencent_hist` | `backend/hl_app/collectors/quotes.py`：单证券、固定腾讯 K 线、显式 quote_symbol/suffix、已收盘过滤；去除 pandas/akshare、stock_info、全市场 spot 与后缀发现依赖 |
+| `core/sync/daily_quote.py`（耦合核对，不复制） | 目标采集只调用 `enabled_securities` 和 `collect_security`；不迁全市场循环、市值修正、视图刷新和旧 DB upsert |
+| `tests/test_web/test_watchlist.py` 的行情/规范化用例 | `backend/tests/test_watchlist.py`：同名核心边界；旧登录/新增/删除和 AI 用例分别由 B/E 合同替代 |
+| 新增 DB 与采集生命周期合同 | `backend/tests/test_watchlist_db.py`：三市场同码、约束、权限、维护态、停用和幂等写入 |
+| `frontend/src/pages/watchlist-page.tsx` 与类型 | 目标同名页面保留筛选、表格、研究链接、编辑和断线 sparkline；删除搜索、新增/移除、分析链接和独立管理员登录 |
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。

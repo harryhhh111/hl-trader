@@ -12,7 +12,8 @@
     "test:hl-queries": "esbuild src/components/hyperliquid/queries.test.ts --bundle --platform=node --format=esm --alias:@=./src --outfile=/tmp/hl-queries.test.mjs && node --test /tmp/hl-queries.test.mjs",
     "test:hl-pages": "esbuild src/pages/hyperliquid-pages.test.tsx --bundle --platform=node --format=cjs --alias:@=./src --outfile=/tmp/hl-pages.test.cjs && node --test /tmp/hl-pages.test.cjs",
     "test:login": "esbuild src/pages/login-page.test.tsx --bundle --platform=node --format=cjs --alias:@=./src --outfile=/tmp/hl-login.test.cjs && node --test /tmp/hl-login.test.cjs",
-    "test:unit": "npm run test:unit-client && npm run test:hl-identity && npm run test:hl-format && npm run test:hl-queries && npm run test:hl-pages && npm run test:login",
+    "test:watchlist": "esbuild src/pages/watchlist-page.test.tsx --bundle --platform=node --format=cjs --alias:@=./src --outfile=/tmp/hl-watchlist.test.cjs && node --test /tmp/hl-watchlist.test.cjs",
+    "test:unit": "npm run test:unit-client && npm run test:hl-identity && npm run test:hl-format && npm run test:hl-queries && npm run test:hl-pages && npm run test:login && npm run test:watchlist",
     "preview": "vite preview"
   },
   "dependencies": {

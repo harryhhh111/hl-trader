@@ -61,3 +61,22 @@ export const hyperliquidPairsApi = {
   ),
   announcements: () => apiFetch<import("@/lib/types/hyperliquid").HlV2Announcements>("/api/v1/hyperliquid/announcements"),
 };
+
+export const watchlistApi = {
+  list: () => apiFetch<import("@/lib/types/watchlist").WatchItem[]>("/api/v1/watchlist"),
+  save: (item: Pick<import("@/lib/types/watchlist").WatchItem, "id" | "group_name" | "note" | "research_url" | "sort_order">) =>
+    apiFetch<{ id: number }>(`/api/v1/watchlist/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        group_name: item.group_name,
+        note: item.note,
+        research_url: item.research_url,
+        sort_order: item.sort_order,
+      }),
+    }),
+  quotes: (market: import("@/lib/types/common").Market, codes: string[]) =>
+    apiFetch<import("@/lib/types/watchlist").QuoteBatch>("/api/v1/watchlist/quotes", {
+      method: "POST",
+      body: JSON.stringify({ market, codes }),
+    }),
+};

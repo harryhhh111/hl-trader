@@ -3,6 +3,7 @@ import { NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } fr
 import { HyperliquidPage } from "@/pages/hyperliquid-page";
 import { HyperliquidPairPage } from "@/pages/hyperliquid-pair-page";
 import { LoginPage } from "@/pages/login-page";
+import { WatchlistPage } from "@/pages/watchlist-page";
 import { Button } from "@/components/ui/button";
 import { sessionApi } from "@/lib/api/client";
 
@@ -50,7 +51,7 @@ export default function App() {
       <Route element={<ProtectedLayout />}>
         <Route path="/hyperliquid" element={<HyperliquidPage />} />
         <Route path="/hyperliquid/pairs/:pairId" element={<HyperliquidPairPage />} />
-        <Route path="/watchlist" element={<Placeholder title="关注股" />} />
+        <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/news" element={<Placeholder title="每日资讯" />} />
         <Route path="/" element={<Navigate to="/hyperliquid" replace />} />
         <Route path="*" element={<Navigate to="/hyperliquid" replace />} />

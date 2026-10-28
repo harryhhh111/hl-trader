@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from importlib import resources
 from typing import Sequence
 
@@ -36,7 +37,7 @@ def _migration_files() -> list[tuple[str, str]]:
 
 def migrate(url: str) -> list[str]:
     applied: list[str] = []
-    with connect(url) as conn:
+    with closing(connect(url)) as conn, conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK_KEY,))
             cursor.execute(

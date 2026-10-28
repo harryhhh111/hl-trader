@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from .auth import AuthService
 from .config import Settings
 from .db import WebLifecycle
-from .routes import hyperliquid, session
+from .routes import hyperliquid, session, watchlist
 
 
 @asynccontextmanager
@@ -57,6 +57,7 @@ def create_app() -> FastAPI:
 
     app.include_router(session.router, prefix="/api/v1")
     app.include_router(hyperliquid.router, prefix="/api/v1")
+    app.include_router(watchlist.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     def health() -> dict[str, dict[str, str]]:

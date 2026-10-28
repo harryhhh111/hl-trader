@@ -29,7 +29,7 @@
 
 ## B：登录与 Hyperliquid
 
-状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 A 提交 `b2743b0d758ab218563bddddba5aba24eb50552b`。
+状态：完成，阶段提交 `3cf306d3d4854faffaae6307399faff183056987`。阶段起点 HEAD 为 A 提交 `b2743b0d758ab218563bddddba5aba24eb50552b`。
 
 已落地：持久化 `auth_control/auth_epoch`、带 epoch 和 CSRF 哈希的会话、管理端 initialize/rotate、持久化登录限速、全数据 API 鉴权、Origin/CSRF 检查、单 Web 锁失效终止采集与关闭流程；v2 目录/快照/公告、严格 DTO 与身份校验、30 秒缓存、单飞和最多两个子进程；React 登录/总览/详情/图表与同源 API；目标内脱敏共享 fixture。v1 Web 路由、分析链接和旧配置均未注册。
 
@@ -40,4 +40,19 @@
 - `npm run test:unit && npm run build`：32 个前端 case 实际执行通过，其中 Hyperliquid 26、登录 2、API client 4；生产构建成功。
 - `python3 tests/fixtures/hyperliquid/normalize.py --check`：通过。样本只含虚构地址，Python/React 路径均指向本仓库。
 
-未完成：真实浏览器、真实公开账户、生产 OS 权限和部署验收；这些留待 G/授权后验收，未宣称完成。B 阶段提交号在后续记录中补充。
+未完成：真实浏览器、真实公开账户、生产 OS 权限和部署验收；这些留待 G/授权后验收，未宣称完成。B 阶段提交号已补记于上文。
+
+## C：关注股与行情
+
+状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 B 提交 `3cf306d3d4854faffaae6307399faff183056987`。
+
+已落地：最小 securities/watchlist/daily_quotes schema、统一代码与显式行情源映射、启用项列表、白名单元数据 PATCH、只查库的三市场行情、近 20 日断线走势、腾讯单证券未复权日线采集及 90/365 日有界回补。没有 create/delete/search/analyzer API 或入口，没有 stock_info、全市场扫描和视图刷新依赖。
+
+实际验证：
+
+- Python 离线套件：120 passed，22 deselected；覆盖代码/CIK/来源校验、类别股、非有限价格、缺前收、35% 跳变、4 日滞后、三市场收盘边界和无新增/删除路由。
+- 在 `/tmp/hl-app-pg-C.letpNd` 临时 PostgreSQL 上运行 DB 套件：22 passed，120 deselected；覆盖三市场同码隔离、迁移与约束、维护态拒绝写入、白名单更新、只枚举启用项、停用前后重新核对、已知价格不被缺值覆盖。
+- 前端完整单测 33 项（新增关注股表格 1 项）及生产构建通过；页面不含新增、移除、搜索或分析入口。
+- 修复迁移验证发现的 PostgreSQL 兼容问题：不用 `isfinite(double precision)`，改为显式 NaN/Infinity 检查；迁移连接在成功和异常时均确定性关闭，避免 traceback 保留会话锁。修复后整套 DB 用例无悬挂通过。
+
+未完成：US/A/HK 真实来源可达性、公告和 AI；真实网络采集未执行。C 阶段提交号在后续记录中补充。

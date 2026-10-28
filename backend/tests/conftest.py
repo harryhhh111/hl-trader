@@ -31,6 +31,11 @@ class PostgresNamespace:
                         sql.Identifier(self.schema), sql.Identifier(self.role)
                     )
                 )
+                cursor.execute(
+                    sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}").format(
+                        sql.Identifier(self.schema), sql.Identifier(self.role)
+                    )
+                )
                 for table in ("operation_control", "auth_control", "schema_migrations"):
                     cursor.execute(
                         sql.SQL("REVOKE INSERT, UPDATE, DELETE ON {}.{} FROM {}").format(
