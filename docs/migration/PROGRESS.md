@@ -59,7 +59,7 @@
 
 ## D：公告与资讯
 
-状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 C 提交 `bc97012110e79f7ece36eb0bf7b8e096a3bc5249`。
+状态：完成，阶段提交 `abdad943febf62040f21ff1cf8924e4127fa3021`。阶段起点 HEAD 为 C 提交 `bc97012110e79f7ece36eb0bf7b8e096a3bc5249`。
 
 已落地：来源注册、不可变 revision、首版多证券关联及公司级理由、check/gap/run/recovery、SEC submissions 与旧文件分页恢复、Nebius/Q4 IR、RSS/Atom 与 Finnhub 媒体适配、共享 SEC gate、公告摘要/详情、每日信息流折叠与重要性置顶。读取 API 只查库，不调用采集器或模型；非美股明确不支持。
 
@@ -70,4 +70,19 @@
 - SEC gate 使用四个真实本地进程和本机 HTTP mock 验证最多 2 次/秒；429 持久化冷却、协调失败零请求和任意外部 URL 拒绝均通过。
 - 前端 35 项单测及生产构建通过；新增每日资讯 2 项，公告摘要/详情、折叠公司标签和理由展示接入关注股与资讯页。
 
-未完成：真实 SEC/IR/媒体出口与既有来源状态调整、AI 和常驻 worker；未执行真实网络采集。D 阶段提交号在后续记录中补充。
+未完成：真实 SEC/IR/媒体出口与既有来源状态调整、AI 和常驻 worker；未执行真实网络采集。D 阶段提交号已补记于上文。
+
+## E：AI 与专属调度
+
+状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 D 提交 `abdad943febf62040f21ff1cf8924e4127fa3021`。
+
+已落地：固定 Git commit 研究读取、理由草稿与 `[通用草稿]`、有界 mmx 子进程、媒体中文增强与官方 importance、Web/worker 两个各 1 并发命名池、单实例 worker 生命周期锁、quotes/announcements/news_enhancement 三类任务和 dry-run。Web 不执行资讯增强，常驻与一次性 worker 共用锁，默认全部关闭。
+
+实际验证：
+
+- Python 离线套件：137 passed，36 deselected；覆盖研究未提交内容隔离、坏 Git/坏 schema、模型非法 JSON/字段、空输出和资讯并发上限。
+- 在 `/tmp/hl-app-pg-E.Ebo2HM` 临时 PostgreSQL 上运行 DB 套件：38 passed，137 deselected；覆盖研究/通用草稿不保存、理由池上限、增强失败原文和既有字段不变、worker 独占及禁用态。
+- 实际执行 `python -m hl_app.workers --dry-run`：仅输出本应用任务和空目标，无网络请求；`HL_APP_COLLECTORS_ENABLED=false ... --once --kind quotes` 返回 disabled。
+- 前端 35 项单测与生产构建通过；AI 草稿只填入编辑框，人工修改后才可保存。`npm audit` 为 0 vulnerabilities。
+
+未完成：真实 mmx/研究目录、生产调度启用、真实浏览器和部署；未调用真实模型或启动常驻采集。E 阶段提交号在后续记录中补充。

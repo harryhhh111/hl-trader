@@ -58,6 +58,7 @@ crates.io 固定版本使用。
 | FastAPI | MIT | 独立 HTTP API |
 | uvicorn | BSD-3-Clause | 单进程 ASGI 服务 |
 | psycopg2 / psycopg2-binary | LGPL-3.0-or-later（含开源使用例外说明） | PostgreSQL 参数化访问、迁移和协调锁 |
+| PyYAML | MIT | 研究入口 YAML 安全解析与重复键/别名限制 |
 | React / React DOM / React Router | MIT | 独立页面与路由 |
 | TanStack React Query | MIT | 前端请求状态与缓存 |
 | Vite / @vitejs/plugin-react / esbuild / TypeScript | MIT / MIT / MIT / Apache-2.0 | 前端构建与 Node 测试打包 |

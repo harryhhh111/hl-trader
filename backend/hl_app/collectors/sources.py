@@ -20,6 +20,7 @@ from .announcements import (
     record_attempt,
     record_gap,
     record_success,
+    update_llm_fields,
     upsert_announcement,
     upsert_recovery,
 )
@@ -208,6 +209,7 @@ def collect_source(
     sec_client: SECClient | None = None,
     http_get=_fetch_http,
     now: datetime | None = None,
+    enhancer=None,
 ) -> dict:
     started = now or datetime.now(timezone.utc)
     task_id = str(uuid.uuid4())
@@ -242,25 +244,47 @@ def collect_source(
         else:
             records = parse_feed(http_get(source["entry_url"]), source)
         inserted = revised = 0
+        new_versions = []
         with psycopg2.connect(url) as conn:
             for record in records:
-                outcome, _ = upsert_announcement(conn, source["source_id"], issuer, relations, record, False, started)
+                outcome, revision = upsert_announcement(conn, source["source_id"], issuer, relations, record, False, started)
                 inserted += outcome == "inserted"
                 revised += outcome == "revised"
+                if outcome != "seen":
+                    new_versions.append((record, revision))
             if partial:
                 record_attempt(conn, source["source_id"], issuer, "partial", "budget_exhausted")
                 upsert_recovery(conn, source["source_id"], issuer, recovery_start, started, recovery_cursor, True)
-                run_status = "partial"
             else:
                 record_success(conn, source["source_id"], issuer, started, started + timedelta(minutes=source.get("interval_minutes") or 60))
                 delete_recovery(conn, source["source_id"], issuer)
-                run_status = "success"
+        enhancement_failed = 0
+        if enhancer is not None:
+            for record, revision in new_versions:
+                try:
+                    fields = enhancer(record, source["source_kind"], relations[0][0] if relations else "")
+                    with psycopg2.connect(url) as conn:
+                        update_llm_fields(conn, source["source_id"], record.source_record_id, revision, **fields)
+                except Exception:
+                    enhancement_failed += 1
+        run_status = "partial" if partial or enhancement_failed else "success"
+        with psycopg2.connect(url) as conn:
+            if enhancement_failed:
+                record_attempt(conn, source["source_id"], issuer, "partial", "enhance_failed")
             insert_run(
                 conn, task_id, source["source_id"], issuer, run_status, started,
                 fetched=len(records), inserted=inserted, revised=revised,
                 parser_version=source["parser_version"],
+                error_class="enhance_failed" if enhancement_failed else None,
+                error_detail=f"{enhancement_failed} 条增强失败" if enhancement_failed else None,
             )
-        return {"fetched": len(records), "inserted": inserted, "revised": revised, "partial": partial}
+        return {
+            "fetched": len(records),
+            "inserted": inserted,
+            "revised": revised,
+            "partial": run_status == "partial",
+            "enhancement_failed": enhancement_failed,
+        }
     except Exception as exc:
         with psycopg2.connect(url) as conn:
             record_attempt(conn, source["source_id"], issuer, "failed", type(exc).__name__)

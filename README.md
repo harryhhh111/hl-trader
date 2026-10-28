@@ -22,7 +22,12 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.lock
 .venv/bin/python -m pip install --no-deps -e backend
 .venv/bin/python -m hl_app.db migrate
+.venv/bin/python -m hl_app.auth initialize
 .venv/bin/python -m hl_app
+.venv/bin/python -m hl_app.workers --dry-run
+.venv/bin/python -m hl_app.workers --once --kind quotes
+.venv/bin/python -m hl_app.workers --once --kind announcements
+# 只有明确启用后才使用：python -m hl_app.workers --run
 
 cd frontend
 npm ci

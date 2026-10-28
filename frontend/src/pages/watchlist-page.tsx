@@ -94,6 +94,14 @@ export function WatchlistPage() {
     },
     onError: (error) => setActionError(errorText(error)),
   });
+  const suggest = useMutation({
+    mutationFn: (item: WatchItem) => watchlistApi.suggest({ market: item.market, stock_code: item.stock_code, stock_name: item.stock_name }),
+    onSuccess: (draft) => {
+      setActionError("");
+      setEditor((current) => current ? { ...current, group_name: draft.group || current.group_name, note: draft.note || current.note } : current);
+    },
+    onError: (error) => setActionError(errorText(error)),
+  });
 
   return (
     <div className="space-y-6">
@@ -157,6 +165,7 @@ export function WatchlistPage() {
         <Card><CardContent className="pt-6">
           <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); save.mutate(editor); }}>
             <h2 className="font-semibold">编辑 {editor.stock_name} · {editor.stock_code}</h2>
+            <div className="space-y-1"><Button type="button" variant="outline" size="sm" disabled={suggest.isPending} onClick={() => suggest.mutate(editor)}>{suggest.isPending ? "生成中…" : "AI 生成理由草稿"}</Button>{suggest.data && <p className="text-xs text-muted-foreground">{suggest.data.source === "research_doc" ? `基于研究：${suggest.data.docs.join("、")}` : "通用草稿"}；只填入编辑框，保存前可修改。</p>}</div>
             <label className="block text-sm">分组<input className="mt-1 w-full border rounded-md bg-background p-2" maxLength={80} value={editor.group_name} onChange={(event) => setEditor({ ...editor, group_name: event.target.value })} /></label>
             <label className="block text-sm">关注理由<textarea className="mt-1 w-full border rounded-md bg-background p-3 min-h-24" maxLength={2000} value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} /></label>
             <label className="block text-sm">研究链接<input className="mt-1 w-full border rounded-md bg-background p-2" type="url" maxLength={2000} value={editor.research_url} onChange={(event) => setEditor({ ...editor, research_url: event.target.value })} /></label>

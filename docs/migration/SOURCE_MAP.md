@@ -57,6 +57,17 @@
 | `tests/test_daily_news_baseline.py` 及公告/SEC/IR/媒体测试 | `backend/tests/test_news.py`、`test_source_adapters.py`、`test_announcements_db.py`、`test_sec_client.py`：保留核心边界并新增真实多进程 gate 与分页恢复 |
 | `frontend/src/pages/news-page.tsx`、`components/news/stock-relations.tsx` | 同名迁入；watchlist 增加公告摘要/详情，旧独立登录/采集提示改为目标配置 |
 
+## E 阶段测试追溯
+
+| 来源 | 目标与覆盖 |
+| --- | --- |
+| `web/services/research_reader.py` | `backend/hl_app/services/research_reader.py`：固定 Git commit、普通 blob、章节摘录与 fail-closed 原样保留，不执行研究代码或读取工作区未提交内容 |
+| `web/services/watchlist_service.py` 的 AI 草稿 | `backend/hl_app/services/ai.py::suggest_fields`：只查启用证券和本库行业，研究路径/mmx 显式配置，草稿不自动保存；旧 stock_info 不迁 |
+| `core/announcements/llm_enhance.py` 与 `tests/test_llm_enhance.py` | `services/ai.py::enhance_media/enhance_official`、`backend/tests/test_ai.py`：媒体三字段、官方仅 importance，非法/超时/超限失败，不默认 normal |
+| 采集增强调用 | `collectors/sources.py` 仅对本轮 inserted/revised 调用增强；原文先提交，失败留 NULL 并记 partial/run warning，存量不回填 |
+| 专属 worker（替代旧全局 scheduler 边界） | `backend/hl_app/workers/`：quotes/announcements/news_enhancement，固定 DB 生命周期锁，dry-run 无网络，默认关闭，无财务/全市场任务 |
+| 新增 AI/worker 回归 | `backend/tests/test_research.py`、`test_ai_db.py`：研究/通用草稿、人工理由不覆盖、两个并发池、增强失败原文、worker 独占 |
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。

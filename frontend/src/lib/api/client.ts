@@ -79,6 +79,11 @@ export const watchlistApi = {
       method: "POST",
       body: JSON.stringify({ market, codes }),
     }),
+  suggest: (item: { market: import("@/lib/types/common").Market; stock_code: string; stock_name: string }) =>
+    apiFetch<import("@/lib/types/watchlist").WatchSuggestion>("/api/v1/watchlist/suggest", {
+      method: "POST",
+      body: JSON.stringify(item),
+    }),
   announcements: (days = 7) => apiFetch<import("@/lib/types/watchlist").AnnouncementSummary>(`/api/v1/watchlist/announcements?days=${days}`),
   itemAnnouncements: (itemId: number, params: { days?: number; offset?: number; limit?: number; source?: string } = {}) => {
     const query = new URLSearchParams({
