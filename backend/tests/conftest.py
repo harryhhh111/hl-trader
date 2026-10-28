@@ -31,11 +31,12 @@ class PostgresNamespace:
                         sql.Identifier(self.schema), sql.Identifier(self.role)
                     )
                 )
-                cursor.execute(
-                    sql.SQL("REVOKE INSERT, UPDATE, DELETE ON {}.operation_control FROM {}").format(
-                        sql.Identifier(self.schema), sql.Identifier(self.role)
+                for table in ("operation_control", "auth_control", "schema_migrations"):
+                    cursor.execute(
+                        sql.SQL("REVOKE INSERT, UPDATE, DELETE ON {}.{} FROM {}").format(
+                            sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)
+                        )
                     )
-                )
 
 
 def _schema_url(url: str, schema: str) -> str:

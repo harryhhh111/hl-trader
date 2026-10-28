@@ -12,7 +12,7 @@
 
 ## A：基线与骨架
 
-状态：代码与验证完成，待阶段提交。
+状态：完成，阶段提交 `b2743b0d758ab218563bddddba5aba24eb50552b`。
 
 已落地：独立 Python 包、三类 DSN 无回退、SQL migration、operation control 默认 maintenance、单 Web advisory lifecycle lock、FastAPI app factory、React/Vite 基础、同源 v1 client、来源清单及测试骨架。
 
@@ -25,4 +25,19 @@
 - `cargo fmt --check`：通过；`cargo test --offline`：154 passed、0 failed、1 ignored（既有公开来源 smoke）；`cargo clippy --offline --all-targets -- -D warnings`：通过。
 - 验证中遇到主机磁盘 ENOSPC。仅清理可重新下载的包/浏览器缓存并重建 Rust `target`；Rust 编译使用 `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` 降低中间产物，未减少或跳过任何测试。旧 `/tmp` 数据库备份和 stock_data 数据未改动。
 
-未完成：A 阶段以外的业务页面、认证和采集；真实外部来源、生产数据库、部署和真实采集均未执行。阶段提交号在后续进展记录中补充。
+未完成：A 阶段以外的业务页面、认证和采集；真实外部来源、生产数据库、部署和真实采集均未执行。阶段提交号已补记于上文。
+
+## B：登录与 Hyperliquid
+
+状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 A 提交 `b2743b0d758ab218563bddddba5aba24eb50552b`。
+
+已落地：持久化 `auth_control/auth_epoch`、带 epoch 和 CSRF 哈希的会话、管理端 initialize/rotate、持久化登录限速、全数据 API 鉴权、Origin/CSRF 检查、单 Web 锁失效终止采集与关闭流程；v2 目录/快照/公告、严格 DTO 与身份校验、30 秒缓存、单飞和最多两个子进程；React 登录/总览/详情/图表与同源 API；目标内脱敏共享 fixture。v1 Web 路由、分析链接和旧配置均未注册。
+
+实际验证：
+
+- `.venv/bin/python -m pytest -c backend/pyproject.toml backend/tests -m 'not db and not live' -q`：101 passed，17 deselected。覆盖 v2 配置/身份/块级语义、E1–E3 类型破坏、七类真实子进程边界、同 key 单飞、并发上限和锁失效终止。
+- 在 `/tmp/hl-app-pg-B.JMz6FI` 临时 PostgreSQL 上显式运行 DB 套件：17 passed，101 deselected。覆盖登录/注销/过期、哈希存储、epoch 轮换幂等、旧配置拒绝、多认证组件会话、轮换与签发竞争、持久化限速，以及完成登录后的六组 E1–E3 HTTP 用例和未登录 401。
+- `npm run test:unit && npm run build`：32 个前端 case 实际执行通过，其中 Hyperliquid 26、登录 2、API client 4；生产构建成功。
+- `python3 tests/fixtures/hyperliquid/normalize.py --check`：通过。样本只含虚构地址，Python/React 路径均指向本仓库。
+
+未完成：真实浏览器、真实公开账户、生产 OS 权限和部署验收；这些留待 G/授权后验收，未宣称完成。B 阶段提交号在后续记录中补充。

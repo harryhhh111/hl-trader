@@ -1,0 +1,93 @@
+{
+    "schema_version": 2,
+    "queried_at": "2026-10-18T18:27:31Z",
+    "block": {
+        "status": "partial",
+        "queried_at": "2026-10-18T18:27:33Z",
+        "source_queries": {
+            "general": {
+                "status": "ok",
+                "queried_at": "2026-10-18T18:27:33Z"
+            },
+            "api": {
+                "status": "unavailable",
+                "queried_at": "2026-10-18T18:27:33Z"
+            }
+        },
+        "items": [
+            {
+                "kind": "general",
+                "text": "Weekly Update New Teams on HyperEVM & HyperCore + papertrade is live on HyperEVM: https://x.com/papertrade_xyz/status/2108852108766437759 + Xverse integrated Hyperliquid perps via …",
+                "published_at": "2026-10-14T02:29:02Z",
+                "url": "https://t.me/hyperliquid_announcements/596",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "[媒体公告，请查看原文]",
+                "published_at": "2026-10-05T09:05:40Z",
+                "url": "https://t.me/hyperliquid_announcements/595",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "The Hyperliquid community event will take place on the evening of October 5 in Singapore: luma.com/HL2026Community This is a chance to spend time with the builders and users who've…",
+                "published_at": "2026-09-30T06:36:08Z",
+                "url": "https://t.me/hyperliquid_announcements/594",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Weekly Update Trading + Open interest reached an ATH of $18B on Hyperliquid New Teams on HyperEVM & HyperCore + DoubleZero Edge now supports Hyperliquid data feeds: https://x.com/d…",
+                "published_at": "2026-09-28T08:24:27Z",
+                "url": "https://t.me/hyperliquid_announcements/593",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Open interest reached an all-time high of $18B on Hyperliquid Note: Two-sided OI is calculated as the sum of long and short positions",
+                "published_at": "2026-09-23T06:21:36Z",
+                "url": "https://t.me/hyperliquid_announcements/592",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Weekly Update Product & Tech + Trailing stops are now available for perp markets. See the Support Docs for more: https://hyperliquid.gitbook.io/hyperliquid-docs/support/faq/trailin…",
+                "published_at": "2026-09-22T06:58:10Z",
+                "url": "https://t.me/hyperliquid_announcements/591",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Trailing stops are now available for perp markets. A trailing stop's trigger price follows the mark price as it moves in favor of the position. When the mark price retraces from it…",
+                "published_at": "2026-09-21T05:43:16Z",
+                "url": "https://t.me/hyperliquid_announcements/590",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Manual borrows are live on Hyperliquid Portfolio margin and manual borrows use the same underlying HyperCore infrastructure, with $269M in assets borrowed today. Users can supply H…",
+                "published_at": "2026-09-18T06:46:01Z",
+                "url": "https://t.me/hyperliquid_announcements/589",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "By community request, $USELESS perps have been listed with up to 3x leverage. Listing is not an endorsement of the project. Past performance does not guarantee future results. Do n…",
+                "published_at": "2026-09-08T16:06:16Z",
+                "url": "https://t.me/hyperliquid_announcements/587",
+                "source": "telegram"
+            },
+            {
+                "kind": "general",
+                "text": "Weekly Update Product & Tech + Manual borrowing on HyperCore is live on mainnet. As a reminder, HyperEVM smart contracts can access HyperCore borrow/lend functionality from CoreWri…",
+                "published_at": "2026-09-08T02:47:33Z",
+                "url": "https://t.me/hyperliquid_announcements/586",
+                "source": "telegram"
+            }
+        ],
+        "diagnostics": [
+            "api 频道公告查询失败（HTTP 302）"
+        ]
+    }
+}

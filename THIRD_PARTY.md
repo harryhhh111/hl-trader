@@ -61,8 +61,12 @@ crates.io 固定版本使用。
 | React / React DOM / React Router | MIT | 独立页面与路由 |
 | TanStack React Query | MIT | 前端请求状态与缓存 |
 | Vite / @vitejs/plugin-react / esbuild / TypeScript | MIT / MIT / MIT / Apache-2.0 | 前端构建与 Node 测试打包 |
+| ECharts | Apache-2.0 | 比价与关注股日线图表 |
+| Radix UI / class-variance-authority / clsx / tailwind-merge | MIT | 既有 UI 组件与样式合并 |
+| Tailwind CSS / tailwindcss-animate / PostCSS / Autoprefixer | MIT | 保留来源页面样式与生产 CSS 构建 |
+| lucide-react | ISC | 页面图标 |
 
-精确安装版本见 `backend/requirements.lock` 和 `frontend/package-lock.json`。后续迁移的 ECharts 等依赖在实际引入时补充。
+精确安装版本见 `backend/requirements.lock` 和 `frontend/package-lock.json`。后续新增依赖在实际引入时补充。
 
 ## 本项目自身许可证
 

@@ -147,15 +147,15 @@ hl-trader --config /固定路径/pairs.json dashboard --announcements --json
   并映射固定官方 URL，无任意 URL。HIP-3 合约用完整标识（如 `xyz:NBIS`）精确匹配，
   不会简化成 `NBIS`；`userFunding` 按官方 API 不带 dex 参数。
 - 输出契约为 `schema_version: 2`、固定五区块、数值一律十进制字符串、分源时间与诊断；
-  完整 DTO 由 `src/dashboard/snapshot.rs` 定义，Web 契约测试实读
-  `stock_data/tests/fixtures/hyperliquid/` 中由 Rust 生成的共享 fixture。
+  完整 DTO 由 `src/dashboard/snapshot.rs` 定义，Web 契约测试实读本仓库
+  `tests/fixtures/hyperliquid/` 中由 Rust 离线 mock 生成并脱敏的共享 fixture。
   `unlock_anchors=null` 的 pair 输出 `blocks.unlocks=null`；账户地址为 `null` 的 pair
   只展示公开行情，账户/仓位块明确 unavailable（`items=null`，不是空数组）。
 - 退出码：`0` 成功（区块级降级不算失败）；`1` 配置非法/进程失败/采集期配置被替换
   （后端转 503）；`2` 未知或已停用 pair id（后端转 404）。stdout 只含一行 JSON，
   日志与诊断走 stderr。
 
-JSON pair 配置字段（两侧同一份文件，服务端 `STOCK_HL_PAIRS_CONFIG` 指向）：
+JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由 `HL_APP_PAIRS_CONFIG` 指向）：
 
 | 字段 | 说明 |
 |---|---|

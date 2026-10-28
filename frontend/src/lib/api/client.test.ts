@@ -45,3 +45,24 @@ test("client preserves safe HTTP detail", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("write requests send the CSRF cookie in the header", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = globalThis.document;
+  let headers: Headers | undefined;
+  Object.assign(globalThis, { document: { cookie: "hl_csrf=test-csrf" } });
+  globalThis.fetch = async (_input, init) => {
+    headers = new Headers(init?.headers);
+    return new Response(JSON.stringify({ data: { authenticated: false } }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    await apiFetch("/api/v1/session/logout", { method: "POST" });
+    assert.equal(headers?.get("X-CSRF-Token"), "test-csrf");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.assign(globalThis, { document: originalDocument });
+  }
+});

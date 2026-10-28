@@ -21,6 +21,17 @@
 | 回归 | 执行合同第 3 节列出的 Python/前端测试 | `backend/tests/`、`frontend/src/**/*.test.*`、`frontend/e2e/` | 随模块迁移并适配鉴权、目标 fixture 和包名；参数化边界不能因改名或合并而丢失 |
 | 数据迁移 | 无源侧代码修改；目标合同第 9 节 | `backend/hl_app/migration/`、`docs/migration/DATA_CONTRACT.md` | F 阶段新建 full/baseline/rollback 工具与临时源参考演练；正式源导出/恢复交 stock_data agent |
 
+## B 阶段测试追溯
+
+| 来源 | 目标与覆盖 |
+| --- | --- |
+| Rust `src/dashboard/snapshot.rs`：R1、R3、R6、R7、R8 合同所列测试 | Rust 原路径和测试名不变，154 项离线基线继续执行 |
+| `tests/test_web/test_hyperliquid_pairs.py` | `backend/tests/test_hyperliquid_pairs.py`：目录、身份、缓存、R4 完整降级 DTO、R9 窗口与块语义；v1 正向测试替换为 v1 路由 404 |
+| `tests/test_web/test_hyperliquid.py` 的 R5 有界子进程用例 | `backend/tests/test_process.py`：七个同名边界；不迁 v1 路由或其他 v1 测试 |
+| `tests/test_web/test_hyperliquid_fixtures.py` | `backend/tests/test_hyperliquid_fixtures.py`：目标 fixture 实读、字段破坏、E1–E3；缺失 fixture 改为失败而非 skip |
+| 前端 `identity.test.ts`、`queries.test.ts`、`format.test.ts`、`hyperliquid-pages.test.tsx` | 同名迁入 `frontend/src/components/hyperliquid/` 和 `frontend/src/pages/`，共 26 项，完整覆盖 R2 与页面降级 |
+| 新增认证与进程合同 | `backend/tests/test_auth.py`、`test_auth_unit.py`、`test_hyperliquid_concurrency.py`、`test_lifecycle.py`；`frontend/src/pages/login-page.test.tsx` |
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。

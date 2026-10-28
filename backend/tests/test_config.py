@@ -25,10 +25,14 @@ def test_database_urls_do_not_fall_back(purpose: str, variable: str) -> None:
     assert variable not in str(other)
 
 
+AUTH = "A" * 43
+
+
 def test_runtime_settings_ignore_legacy_environment() -> None:
     with pytest.raises(ConfigError, match="HL_APP_DATABASE_URL"):
         Settings.from_env(
             {
+                "HL_APP_AUTH_TOKEN": AUTH,
                 "DATABASE_URL": "postgresql://legacy.invalid/hl",
                 "STOCK_DATABASE_URL": "postgresql://legacy.invalid/stock",
                 "STOCK_MARKETS": "US",
@@ -36,10 +40,16 @@ def test_runtime_settings_ignore_legacy_environment() -> None:
         )
 
 
+def test_runtime_settings_require_auth_token() -> None:
+    with pytest.raises(ConfigError, match="HL_APP_AUTH_TOKEN"):
+        Settings.from_env({"HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl"})
+
+
 def test_runtime_settings_read_explicit_host_and_port() -> None:
     settings = Settings.from_env(
         {
             "HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl",
+            "HL_APP_AUTH_TOKEN": AUTH,
             "HL_APP_HOST": "127.0.0.2",
             "HL_APP_PORT": "9001",
         }
@@ -52,5 +62,9 @@ def test_runtime_settings_read_explicit_host_and_port() -> None:
 def test_invalid_port_is_rejected(port: str) -> None:
     with pytest.raises(ConfigError, match="HL_APP_PORT"):
         Settings.from_env(
-            {"HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl", "HL_APP_PORT": port}
+            {
+                "HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl",
+                "HL_APP_AUTH_TOKEN": AUTH,
+                "HL_APP_PORT": port,
+            }
         )

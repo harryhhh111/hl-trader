@@ -1,8 +1,16 @@
 export class ApiError extends Error {
+  readonly detail: string;
+
   constructor(message: string, readonly status: number) {
     super(message);
     this.name = "ApiError";
+    this.detail = message;
   }
+}
+
+function csrfToken(): string | null {
+  const entry = document.cookie.split("; ").find((value) => value.startsWith("hl_csrf="));
+  return entry ? decodeURIComponent(entry.slice("hl_csrf=".length)) : null;
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -12,6 +20,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+  const method = (init.method || "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrf = csrfToken();
+    if (csrf) headers.set("X-CSRF-Token", csrf);
   }
   const response = await fetch(path, { ...init, credentials: "same-origin", headers });
   let payload: unknown;
@@ -31,3 +44,20 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   }
   return (payload as { data: T }).data;
 }
+
+export const sessionApi = {
+  session: () => apiFetch<{ authenticated: boolean; expires_at?: string }>("/api/v1/session"),
+  login: (token: string) => apiFetch<{ authenticated: boolean; expires_at: string }>("/api/v1/session/login", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  }),
+  logout: () => apiFetch<{ authenticated: false }>("/api/v1/session/logout", { method: "POST" }),
+};
+
+export const hyperliquidPairsApi = {
+  directory: () => apiFetch<import("@/lib/types/hyperliquid").HlPairDirectory>("/api/v1/hyperliquid/pairs"),
+  pairDashboard: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairSnapshot>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/dashboard`,
+  ),
+  announcements: () => apiFetch<import("@/lib/types/hyperliquid").HlV2Announcements>("/api/v1/hyperliquid/announcements"),
+};

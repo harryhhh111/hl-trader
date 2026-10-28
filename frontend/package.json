@@ -6,21 +6,37 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test:unit": "esbuild src/lib/api/client.test.ts --bundle --platform=node --format=esm --outfile=/tmp/hl-app-client.test.mjs && node --test /tmp/hl-app-client.test.mjs",
+    "test:unit-client": "esbuild src/lib/api/client.test.ts --bundle --platform=node --format=esm --outfile=/tmp/hl-app-client.test.mjs && node --test /tmp/hl-app-client.test.mjs",
+    "test:hl-identity": "node --experimental-strip-types --test src/components/hyperliquid/identity.test.ts",
+    "test:hl-format": "node --experimental-strip-types --test src/components/hyperliquid/format.test.ts",
+    "test:hl-queries": "esbuild src/components/hyperliquid/queries.test.ts --bundle --platform=node --format=esm --alias:@=./src --outfile=/tmp/hl-queries.test.mjs && node --test /tmp/hl-queries.test.mjs",
+    "test:hl-pages": "esbuild src/pages/hyperliquid-pages.test.tsx --bundle --platform=node --format=cjs --alias:@=./src --outfile=/tmp/hl-pages.test.cjs && node --test /tmp/hl-pages.test.cjs",
+    "test:login": "esbuild src/pages/login-page.test.tsx --bundle --platform=node --format=cjs --alias:@=./src --outfile=/tmp/hl-login.test.cjs && node --test /tmp/hl-login.test.cjs",
+    "test:unit": "npm run test:unit-client && npm run test:hl-identity && npm run test:hl-format && npm run test:hl-queries && npm run test:hl-pages && npm run test:login",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.5.0",
     "@tanstack/react-query": "^5.56.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "echarts": "^6.1.0",
+    "lucide-react": "^1.63.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.18.5"
+    "react-router-dom": "^7.18.5",
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.5",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.2",
     "esbuild": "^0.28.2",
+    "postcss": "^8.5.32",
+    "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.5.4",
     "vite": "^8.3.5"
   }
