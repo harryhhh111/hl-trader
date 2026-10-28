@@ -104,7 +104,7 @@
 
 ## G：独立性与交互验收
 
-状态：完成，待阶段提交。阶段起点 HEAD 为 F 提交 `341e2d027a42a1b1224a15ce4bea318d5dc3aa98`。
+状态：完成，阶段提交 `cad4d68296f660886dafa2494d287292f8450fbb`。阶段起点 HEAD 为 F 提交 `341e2d027a42a1b1224a15ce4bea318d5dc3aa98`。
 
 - 全层基线：Python 137 passed；Rust 154 passed、1 ignored，fmt/clippy 通过；前端 35 项及生产构建通过。
 - 真实 Chromium：8/8 passed，桌面 1440×900、移动 390×844 各 4 项，覆盖登录/退出、pair 切换、坏解锁块、目录失败旧读数、元数据编辑、AI 草稿保存、资讯筛选和移动端溢出。截图在 `docs/migration/evidence/`。
@@ -113,10 +113,10 @@
 
 ## H：交付与部署准备
 
-状态：完成，待阶段提交。
+状态：完成，阶段提交 `cad4d68296f660886dafa2494d287292f8450fbb`。
 
 已交付 `DATA_CONTRACT.md`、`ACCEPTANCE.md`、`docs/deployment/INDEPENDENT_APP.md` 和 `deploy/` 单 Web/单 worker/nginx/数据库角色模板。根 README 已链接全部文档和实际命令。
 
 正式源侧交接需求：stock_data agent 按 DATA_CONTRACT 实现/执行停写一致性 full 导出、正式源 schema 字段映射、三方回退恢复与兼容性验收；在此之前正式切换不就绪。
 
-未执行：真实账户/来源/模型、生产身份权限、正式源 bundle、实际迁移、正式停写测量、部署、重启、推送和发布。代码迁移交付与本地验证完成，不宣称全部上线完成。G/H 提交号在本记录后续补记。
+未执行：真实账户/来源/模型、生产身份权限、正式源 bundle、实际迁移、正式停写测量、部署、重启、推送和发布。代码迁移交付与本地验证完成，不宣称全部上线完成。
