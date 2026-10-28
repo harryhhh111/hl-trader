@@ -110,7 +110,7 @@
 - 真实 Chromium：8/8 passed，桌面 1440×900、移动 390×844 各 4 项，覆盖登录/退出、pair 切换、坏解锁块、目录失败旧读数、元数据编辑、AI 草稿保存、资讯筛选和移动端溢出。截图在 `docs/migration/evidence/`。
 - 干净副本 `/tmp/hl-app-clean-G.ueynta` 仅由目标文件创建，重新安装后 mock 写库 1 行、登录和列表读取成功，无 stock_data 目录、旧凭据或旧 API。
 - 发现并修复目录失败时旧目录被卸载的问题：查询层恢复旧数据并保留 error 状态；E2E 先等待旧卡片存在再注入失败，且每次先构建当前 dist。
-- 最终复核发现并修复 `initdb --no-locale` 新建的 SQL_ASCII 数据库执行含中文 migration 时的编码失败：所有应用连接统一设置 UTF-8 客户端编码，并增加连接回归。相同全新临时实例完整 DB 套件 43 passed、137 deselected；Python 离线 137 passed、43 deselected；Chromium 8/8 passed。Rust 补齐锁文件缓存后，fmt、154 passed/1 ignored 和 clippy 均通过。
+- 最终复核发现并修复 `initdb --no-locale` 新建的 SQL_ASCII 数据库执行含中文 migration 时的编码失败：所有应用连接统一设置 UTF-8 客户端编码，并增加连接回归。相同全新临时实例完整 DB 套件 43 passed、137 deselected；Python 离线 137 passed、43 deselected；Chromium 8/8 passed。Rust 补齐锁文件缓存后，fmt、154 passed/1 ignored 和 clippy 均通过。修复提交 `bfd621d`。
 
 ## H：交付与部署准备
 
