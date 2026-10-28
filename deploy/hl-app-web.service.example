@@ -1,0 +1,23 @@
+[Unit]
+Description=hl-app single-process web
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hlapp
+Group=hlapp
+WorkingDirectory=/opt/hl-trader
+EnvironmentFile=/etc/hl-app/runtime.env
+ExecStart=/opt/hl-trader/.venv/bin/python -m hl_app
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hl-app
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

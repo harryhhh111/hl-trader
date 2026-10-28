@@ -168,11 +168,11 @@ export function HyperliquidPage() {
       </PageHeader>
 
       {directory.isPending && <p className="text-muted-foreground">正在读取 pair 目录…</p>}
-      {directory.isError && <p className="text-rose-600" role="alert">目录加载失败:{errorText(directory.error)}</p>}
-      {directory.isSuccess && directory.data.pairs.length === 0 && (
+      {directory.isError && <p className="text-rose-600" role="alert">目录加载失败:{errorText(directory.error)}{directory.data ? '，显示上次目录与读数。' : ''}</p>}
+      {directory.data && directory.data.pairs.length === 0 && (
         <Card><CardContent className="py-10 text-center text-muted-foreground">没有启用的 pair</CardContent></Card>
       )}
-      {directory.isSuccess && directory.data.pairs.length > 0 && (
+      {directory.data && directory.data.pairs.length > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
           {directory.data.pairs.map((p) => (
             <PairCard key={p.id} descriptor={p} revision={directory.data.config_revision} />

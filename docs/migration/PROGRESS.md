@@ -89,7 +89,7 @@
 
 ## F：数据导入与回退导出
 
-状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 E 提交 `e8e41552b7177abe32f983731019638c8de620b9`。
+状态：完成，阶段提交 `341e2d027a42a1b1224a15ce4bea318d5dc3aa98`。阶段起点 HEAD 为 E 提交 `e8e41552b7177abe32f983731019638c8de620b9`。
 
 已落地：bundle v1 JSONL/manifest、依赖与自然键校验、空业务库 full dry-run/apply、映射账本、维护锁、baseline ledger、激活、完整 rollback snapshot 和 before/after delta、参考源三方恢复。`DATA_CONTRACT.md` 固定源侧导出与恢复交接；没有增量覆盖、旧生产库连接或自动启用采集。
 
@@ -100,4 +100,23 @@
 - CLI 全链路在 `cli_f` schema 实际执行：migrate→dry-run→apply→baseline→activate→maintenance→rollback-export 全部成功；无业务变化时 delta=0。
 - 修复了 range 数组显式类型转换、range 对象和 timestamptz 的 UTC 规范化，保证导入前后 business hash 稳定。
 
-未完成：正式源 bundle、stock_data agent 正式恢复适配、真实停写窗口测量和生产迁移；这些外部条件未宣称完成。F 阶段提交号在后续记录中补充。
+未完成：正式源 bundle、stock_data agent 正式恢复适配、真实停写窗口测量和生产迁移；这些外部条件未宣称完成。F 阶段提交号已补记于上文。
+
+## G：独立性与交互验收
+
+状态：完成，待阶段提交。阶段起点 HEAD 为 F 提交 `341e2d027a42a1b1224a15ce4bea318d5dc3aa98`。
+
+- 全层基线：Python 137 passed；Rust 154 passed、1 ignored，fmt/clippy 通过；前端 35 项及生产构建通过。
+- 真实 Chromium：8/8 passed，桌面 1440×900、移动 390×844 各 4 项，覆盖登录/退出、pair 切换、坏解锁块、目录失败旧读数、元数据编辑、AI 草稿保存、资讯筛选和移动端溢出。截图在 `docs/migration/evidence/`。
+- 干净副本 `/tmp/hl-app-clean-G.ueynta` 仅由目标文件创建，重新安装后 mock 写库 1 行、登录和列表读取成功，无 stock_data 目录、旧凭据或旧 API。
+- 发现并修复目录失败时旧目录被卸载的问题：查询层恢复旧数据并保留 error 状态；E2E 先等待旧卡片存在再注入失败，且每次先构建当前 dist。
+
+## H：交付与部署准备
+
+状态：完成，待阶段提交。
+
+已交付 `DATA_CONTRACT.md`、`ACCEPTANCE.md`、`docs/deployment/INDEPENDENT_APP.md` 和 `deploy/` 单 Web/单 worker/nginx/数据库角色模板。根 README 已链接全部文档和实际命令。
+
+正式源侧交接需求：stock_data agent 按 DATA_CONTRACT 实现/执行停写一致性 full 导出、正式源 schema 字段映射、三方回退恢复与兼容性验收；在此之前正式切换不就绪。
+
+未执行：真实账户/来源/模型、生产身份权限、正式源 bundle、实际迁移、正式停写测量、部署、重启、推送和发布。代码迁移交付与本地验证完成，不宣称全部上线完成。G/H 提交号在本记录后续补记。

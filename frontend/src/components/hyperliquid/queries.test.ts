@@ -88,6 +88,12 @@ test('慢旧请求迟到不会覆盖新 pair 的 QueryObserver 数据', async ()
 
 test('手动刷新在目录失败时不请求任何 pair 快照', async () => {
   const qc = new QueryClient();
+  const previous = {
+    schema_version: 1,
+    config_revision: 'rev1',
+    pairs: [snapshot('hype-btc', 'rev1').pair],
+  };
+  qc.setQueryData(['hl-directory'], previous);
   let calls = 0;
   await assert.rejects(refreshHyperliquid(qc, undefined, {
     directory: async () => { throw new Error('directory unavailable'); },
@@ -97,6 +103,8 @@ test('手动刷新在目录失败时不请求任何 pair 快照', async () => {
     },
   }), /directory unavailable/);
   assert.equal(calls, 0);
+  assert.equal(qc.getQueryData(['hl-directory']), previous);
+  assert.equal(qc.getQueryState(['hl-directory'])?.status, 'error');
   qc.clear();
 });
 

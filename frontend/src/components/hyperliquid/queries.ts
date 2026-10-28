@@ -45,10 +45,22 @@ export async function refreshHyperliquid(
   pairId?: string,
   api: RefreshApi = hyperliquidPairsApi,
 ): Promise<HlPairDirectory> {
-  const directory = await qc.fetchQuery({
-    ...hlDirectoryQueryOptions(api.directory),
-    staleTime: 0,
-  });
+  const previousDirectory = qc.getQueryData<HlPairDirectory>(['hl-directory']);
+  let directory: HlPairDirectory;
+  try {
+    directory = await qc.fetchQuery({
+      ...hlDirectoryQueryOptions(api.directory),
+      staleTime: 0,
+    });
+  } catch (error) {
+    const query = qc.getQueryCache().find({ queryKey: ['hl-directory'] });
+    query?.setState({
+      data: previousDirectory,
+      status: 'error',
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+    throw error;
+  }
   const pairIds = pairId == null
     ? directory.pairs.map((pair) => pair.id)
     : directory.pairs.some((pair) => pair.id === pairId) ? [pairId] : [];

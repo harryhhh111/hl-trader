@@ -66,6 +66,7 @@ crates.io 固定版本使用。
 | Radix UI / class-variance-authority / clsx / tailwind-merge | MIT | 既有 UI 组件与样式合并 |
 | Tailwind CSS / tailwindcss-animate / PostCSS / Autoprefixer | MIT | 保留来源页面样式与生产 CSS 构建 |
 | lucide-react | ISC | 页面图标 |
+| Playwright | Apache-2.0 | 真实 Chromium 桌面/移动端交互验收 |
 
 精确安装版本见 `backend/requirements.lock` 和 `frontend/package-lock.json`。后续新增依赖在实际引入时补充。
 

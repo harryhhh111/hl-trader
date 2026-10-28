@@ -78,6 +78,14 @@
 | 源侧恢复交接（正式实现交 stock_data agent） | `backend/hl_app/migration/reference.py`：before/after/current 三方恢复、幂等和冲突拒绝，不直连旧库 |
 | 脱敏样本与回归 | `tests/fixtures/migration/`、`backend/tests/test_migration_db.py`：full/幂等/冲突/坏 FK/基线/回退/参考恢复 |
 
+## G/H 独立验收与交付材料
+
+- `frontend/e2e/`：真实 FastAPI/PostgreSQL/同源代理和 Chromium，桌面 1440×900、移动 390×844；先构建当前 dist，全部使用目标 fixture。
+- `docs/migration/ACCEPTANCE.md`：分类证据、截图路径和外部未执行项。
+- `docs/deployment/INDEPENDENT_APP.md`：安装、权限、备份、停写切换和回退手册。
+- `deploy/`：单 Web、单 worker、nginx、数据库角色模板，不启用。
+- `docs/migration/evidence/`：桌面/移动脱敏截图。
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。
