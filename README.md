@@ -10,7 +10,7 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 - 当前 v2 验收状态与上线前待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
 - 历史设计方案（仅用于追溯）：[MVP_PLAN.md](docs/archive/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/archive/PHASE2_PLAN.md)。
-- 独立应用迁移记录：[来源清单](docs/migration/SOURCE_MAP.md)、[执行进展](docs/migration/PROGRESS.md)。
+- 独立应用迁移记录：[来源清单](docs/migration/SOURCE_MAP.md)、[执行进展](docs/migration/PROGRESS.md)、[数据与回退合同](docs/migration/DATA_CONTRACT.md)。
 
 ## 独立 Web 应用（迁移实施中）
 

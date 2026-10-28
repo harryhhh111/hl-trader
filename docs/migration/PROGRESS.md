@@ -74,7 +74,7 @@
 
 ## E：AI 与专属调度
 
-状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 D 提交 `abdad943febf62040f21ff1cf8924e4127fa3021`。
+状态：完成，阶段提交 `e8e41552b7177abe32f983731019638c8de620b9`。阶段起点 HEAD 为 D 提交 `abdad943febf62040f21ff1cf8924e4127fa3021`。
 
 已落地：固定 Git commit 研究读取、理由草稿与 `[通用草稿]`、有界 mmx 子进程、媒体中文增强与官方 importance、Web/worker 两个各 1 并发命名池、单实例 worker 生命周期锁、quotes/announcements/news_enhancement 三类任务和 dry-run。Web 不执行资讯增强，常驻与一次性 worker 共用锁，默认全部关闭。
 
@@ -85,4 +85,19 @@
 - 实际执行 `python -m hl_app.workers --dry-run`：仅输出本应用任务和空目标，无网络请求；`HL_APP_COLLECTORS_ENABLED=false ... --once --kind quotes` 返回 disabled。
 - 前端 35 项单测与生产构建通过；AI 草稿只填入编辑框，人工修改后才可保存。`npm audit` 为 0 vulnerabilities。
 
-未完成：真实 mmx/研究目录、生产调度启用、真实浏览器和部署；未调用真实模型或启动常驻采集。E 阶段提交号在后续记录中补充。
+未完成：真实 mmx/研究目录、生产调度启用、真实浏览器和部署；未调用真实模型或启动常驻采集。E 阶段提交号已补记于上文。
+
+## F：数据导入与回退导出
+
+状态：代码与验证完成，待阶段提交。阶段起点 HEAD 为 E 提交 `e8e41552b7177abe32f983731019638c8de620b9`。
+
+已落地：bundle v1 JSONL/manifest、依赖与自然键校验、空业务库 full dry-run/apply、映射账本、维护锁、baseline ledger、激活、完整 rollback snapshot 和 before/after delta、参考源三方恢复。`DATA_CONTRACT.md` 固定源侧导出与恢复交接；没有增量覆盖、旧生产库连接或自动启用采集。
+
+实际验证：
+
+- `python -m hl_app.migration inspect --bundle tests/fixtures/migration/full`：通过，十实体完整，公告 2、关联 2、来源 2、gap/recovery 各 1。
+- 全套真实 PostgreSQL：42 passed，137 deselected。其中迁移演练覆盖 dry-run/apply/幂等重跑、同 ID 变化拒绝、坏 FK 回滚、baseline/重复 activate、维护态、回退 insert/update/delete、参考恢复幂等与源侧并发冲突。
+- CLI 全链路在 `cli_f` schema 实际执行：migrate→dry-run→apply→baseline→activate→maintenance→rollback-export 全部成功；无业务变化时 delta=0。
+- 修复了 range 数组显式类型转换、range 对象和 timestamptz 的 UTC 规范化，保证导入前后 business hash 稳定。
+
+未完成：正式源 bundle、stock_data agent 正式恢复适配、真实停写窗口测量和生产迁移；这些外部条件未宣称完成。F 阶段提交号在后续记录中补充。

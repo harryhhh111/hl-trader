@@ -154,10 +154,13 @@ def list_items(url: str) -> list[dict]:
 def update_item(url: str, item_id: int, values: dict) -> dict:
     with psycopg2.connect(url) as conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT mode FROM operation_control WHERE singleton = true")
-            mode = cursor.fetchone()[0]
-            if mode != "active":
-                raise WatchlistError(503, "应用处于维护状态，暂停业务写入")
+            from ..migration.common import BundleError
+            from ..migration.service import business_write_guard
+
+            try:
+                business_write_guard(cursor)
+            except BundleError as exc:
+                raise WatchlistError(503, "应用处于维护状态，暂停业务写入") from exc
             cursor.execute(
                 """
                 UPDATE watchlist_items SET group_name = %s, note = %s,

@@ -68,6 +68,16 @@
 | 专属 worker（替代旧全局 scheduler 边界） | `backend/hl_app/workers/`：quotes/announcements/news_enhancement，固定 DB 生命周期锁，dry-run 无网络，默认关闭，无财务/全市场任务 |
 | 新增 AI/worker 回归 | `backend/tests/test_research.py`、`test_ai_db.py`：研究/通用草稿、人工理由不覆盖、两个并发池、增强失败原文、worker 独占 |
 
+## F 阶段数据工具与演练
+
+| 来源 | 目标与覆盖 |
+| --- | --- |
+| 执行合同第 9 节（无源侧代码复制） | `backend/hl_app/migration/common.py`、`service.py`、`__main__.py`：full/inspect/import/maintenance/baseline/activate/rollback-export，三类 DSN 只走各自入口 |
+| 来源 schema 与自然键 | `docs/migration/DATA_CONTRACT.md`：十实体 JSONL、UTC/range 规范化、依赖校验、ID 映射和停写锁协议 |
+| 基线与回退 | `migration_bundles`、`migration_id_map`、`baseline_ledger`、`export_ledger`：自然键/完整值比较，不依赖 updated_at |
+| 源侧恢复交接（正式实现交 stock_data agent） | `backend/hl_app/migration/reference.py`：before/after/current 三方恢复、幂等和冲突拒绝，不直连旧库 |
+| 脱敏样本与回归 | `tests/fixtures/migration/`、`backend/tests/test_migration_db.py`：full/幂等/冲突/坏 FK/基线/回退/参考恢复 |
+
 ## 许可与来源处理
 
 `stock_data` 是本次功能代码的直接迁移来源，不据此改变 hl-trader 自身许可证。复制文件时保留其中已有版权、许可和来源声明；第三方包及资源的直接依赖记录进入根 `THIRD_PARTY.md`，精确版本分别由 Python/Node 锁文件固定。

@@ -73,6 +73,9 @@ def dry_run(url: str) -> dict:
 def run_once(url: str, kind: str, http_get=None) -> dict:
     if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
         return {"status": "disabled", "kind": kind}
+    from ..migration.service import assert_active
+
+    assert_active(url)
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
     try:

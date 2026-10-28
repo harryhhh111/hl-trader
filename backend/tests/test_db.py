@@ -14,7 +14,7 @@ pytestmark = pytest.mark.db
 def test_migration_is_idempotent_and_defaults_to_maintenance(
     postgres_namespace: PostgresNamespace,
 ) -> None:
-    assert migrate(postgres_namespace.migration_url) == ["001_operation_control", "002_auth", "003_watchlist", "004_announcements", "005_sec_request_gate"]
+    assert migrate(postgres_namespace.migration_url) == ["001_operation_control", "002_auth", "003_watchlist", "004_announcements", "005_sec_request_gate", "006_migration_controls"]
     assert migrate(postgres_namespace.migration_url) == []
     with psycopg2.connect(postgres_namespace.migration_url) as conn:
         with conn.cursor() as cursor:

@@ -36,7 +36,7 @@ class PostgresNamespace:
                         sql.Identifier(self.schema), sql.Identifier(self.role)
                     )
                 )
-                for table in ("operation_control", "auth_control", "schema_migrations"):
+                for table in ("operation_control", "auth_control", "schema_migrations", "migration_bundles", "migration_id_map", "baseline_ledger", "export_ledger"):
                     cursor.execute(
                         sql.SQL("REVOKE INSERT, UPDATE, DELETE ON {}.{} FROM {}").format(
                             sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)
