@@ -9,9 +9,9 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-import psycopg2
 from psycopg2 import sql
 
+from ..db import connect
 from .common import (
     ENTITIES,
     NATURAL_KEYS,
@@ -39,7 +39,7 @@ SERIAL_TABLES = {
 
 
 def _connect(url: str):
-    return psycopg2.connect(url, connect_timeout=10)
+    return connect(url, connect_timeout=10)
 
 
 def _lock(cursor) -> None:

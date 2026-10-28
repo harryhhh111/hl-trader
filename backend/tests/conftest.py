@@ -48,6 +48,7 @@ def _schema_url(url: str, schema: str) -> str:
     parts = urlsplit(url)
     query = parse_qs(parts.query)
     query["options"] = [f"-csearch_path={schema}"]
+    query["client_encoding"] = ["UTF8"]
     return urlunsplit(parts._replace(query=urlencode(query, doseq=True)))
 
 

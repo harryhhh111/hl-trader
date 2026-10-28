@@ -8,9 +8,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from ..db import connect
 from ..services.watchlist import TIMEZONES
 
 TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -102,7 +102,7 @@ def closed_records(records: list[dict], market: str, now: datetime) -> list[dict
 
 
 def enabled_securities(url: str) -> list[dict]:
-    with psycopg2.connect(url, cursor_factory=RealDictCursor) as conn:
+    with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -119,7 +119,7 @@ def collect_security(
     now: datetime | None = None,
     http_get: Callable[[str, dict[str, str]], dict] = _default_get,
 ) -> int:
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT enabled FROM watchlist_items WHERE security_id = %s", (security["id"],))
             enabled = cursor.fetchone()
@@ -131,7 +131,7 @@ def collect_security(
     if len([row for row in records if _number(row["close"]) is not None]) < 20:
         records = fetch_tencent_hist(security, current.date() - timedelta(days=365), current.date(), http_get)
     records = closed_records(records, security["market"], current)
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 "SELECT enabled FROM watchlist_items WHERE security_id = %s FOR UPDATE",

@@ -4,8 +4,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-import psycopg2
-
+from ..db import connect
 from ..collectors.quotes import collect_security, enabled_securities
 from ..collectors.sources import collect_source, ensure_sec_sources, registered_sources
 from ..collectors.sec_client import SECClient
@@ -24,7 +23,7 @@ class WorkerLifecycle:
         self.connection = None
 
     def acquire(self) -> None:
-        conn = psycopg2.connect(self.url, connect_timeout=5)
+        conn = connect(self.url, connect_timeout=5)
         conn.autocommit = True
         with conn.cursor() as cursor:
             cursor.execute("SELECT pg_try_advisory_lock(%s)", (WORKER_LIFECYCLE_LOCK_KEY,))

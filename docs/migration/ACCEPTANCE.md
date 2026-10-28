@@ -5,14 +5,14 @@
 ## 1. 代码与离线证据
 
 - A–F 均已完成本仓库代码、fixture 和阶段本地提交。
-- Python 默认套件：137 passed，42 deselected（DB/live）；无失败。
+- Python 默认套件：137 passed，43 deselected（DB/live）；无失败。
 - Rust：`cargo fmt --check` 通过；`cargo test --offline` 154 passed、0 failed、1 个既有公开来源 smoke ignored；`cargo clippy --offline --all-targets -- -D warnings` 通过。
 - 前端：35 个 Node case 实际执行通过；TypeScript/Vite 生产构建通过；`npm audit` 为 0 vulnerabilities。构建有大 chunk 提示，不影响完成状态。
 - Hyperliquid R1–R9 和 E1–E3 的来源→目标映射见 `SOURCE_MAP.md`。共享 fixture 实读，缺文件会失败，不跳过。
 
 ## 2. 真实 PostgreSQL 集成
 
-各阶段使用 `initdb` 新建的本机临时实例，显式注入 `HL_APP_TEST_DATABASE_URL`，测试只清理自身 schema/角色。最新全套结果：42 passed，137 deselected，无 skip 隐藏 DB 项。
+各阶段使用 `initdb` 新建的本机临时实例，显式注入 `HL_APP_TEST_DATABASE_URL`，测试只清理自身 schema/角色。最新全套结果：43 passed，137 deselected，无 skip 隐藏 DB 项。最终复核另以 `initdb --no-locale` 的 SQL_ASCII 实例跑通同一全套，验证所有应用连接的 UTF-8 客户端编码。
 
 覆盖：迁移与权限、Web/worker 生命周期锁、认证 epoch/轮换/并发、三市场行情、公告 revision/多公司关联、来源失败与恢复、四进程 SEC gate、AI 失败、full 导入/幂等/回滚、baseline/activate、回退差异和参考源三方恢复。
 

@@ -8,9 +8,9 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from ..db import connect
 from .process import HyperliquidUnavailable, communicate_bounded
 from .research_reader import read_research
 from .watchlist import canonical_code
@@ -95,7 +95,7 @@ def _extract_json(text: str) -> dict:
 
 def suggest_fields(url: str, market: str, code: str, name: str) -> dict:
     code = canonical_code(market, code)
-    with psycopg2.connect(url, cursor_factory=RealDictCursor) as conn:
+    with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """

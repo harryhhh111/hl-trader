@@ -10,10 +10,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Mapping, Sequence
 
 import os
-import psycopg2
 from fastapi import HTTPException, Request
 
 from .config import ConfigError, database_url, optional_value
+from .db import connect
 
 AUTH_LOCK_KEY = 0x484C5F4155544831
 SESSION_COOKIE = "hl_session"
@@ -73,7 +73,7 @@ def _auth_token(environ: Mapping[str, str] | None = None) -> str:
 
 def initialize(url: str, token: str) -> int:
     fingerprint = token_fingerprint(token)
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", (AUTH_LOCK_KEY,))
             cursor.execute("SELECT auth_epoch FROM auth_control WHERE singleton = true FOR UPDATE")
@@ -88,7 +88,7 @@ def initialize(url: str, token: str) -> int:
 
 def rotate(url: str, token: str) -> int:
     fingerprint = token_fingerprint(token)
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", (AUTH_LOCK_KEY,))
             cursor.execute(
@@ -126,7 +126,7 @@ class AuthService:
         return epoch
 
     def verify_configuration(self) -> None:
-        with psycopg2.connect(self._url) as conn:
+        with connect(self._url) as conn:
             with conn.cursor() as cursor:
                 self._control(cursor)
 
@@ -137,7 +137,7 @@ class AuthService:
             raise AuthError(401, "登录 token 无效") from exc
         failure: AuthError | None = None
         credential: SessionCredential | None = None
-        with psycopg2.connect(self._url) as conn:
+        with connect(self._url) as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", (AUTH_LOCK_KEY,))
                 epoch = self._control(cursor)
@@ -185,7 +185,7 @@ class AuthService:
         if not session_token:
             raise AuthError(401, "未登录")
         session_hash = _hash(session_token)
-        with psycopg2.connect(self._url) as conn:
+        with connect(self._url) as conn:
             with conn.cursor() as cursor:
                 epoch = self._control(cursor)
                 cursor.execute(
@@ -201,7 +201,7 @@ class AuthService:
         return SessionInfo(session_hash, row[0], row[1], row[2])
 
     def logout(self, session: SessionInfo) -> None:
-        with psycopg2.connect(self._url) as conn:
+        with connect(self._url) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     "UPDATE auth_sessions SET revoked_at = now() WHERE session_sha256 = %s AND revoked_at IS NULL",

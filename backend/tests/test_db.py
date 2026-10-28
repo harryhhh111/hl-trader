@@ -4,11 +4,16 @@ import psycopg2
 import pytest
 from psycopg2 import errors
 
-from hl_app.db import WebInstanceAlreadyRunning, WebLifecycle, migrate
+from hl_app.db import WebInstanceAlreadyRunning, WebLifecycle, connect, migrate
 
 from .conftest import PostgresNamespace
 
 pytestmark = pytest.mark.db
+
+
+def test_connection_uses_utf8(postgres_namespace: PostgresNamespace) -> None:
+    with connect(postgres_namespace.migration_url) as conn:
+        assert conn.encoding == "UTF8"
 
 
 def test_migration_is_idempotent_and_defaults_to_maintenance(

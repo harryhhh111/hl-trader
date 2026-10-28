@@ -19,11 +19,11 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import psycopg2
 import psycopg2.errors
 from psycopg2.extras import RealDictCursor
 
 from ..config import database_url
+from ..db import connect
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class AnnouncementConfigError(RuntimeError):
 
 
 def _read_rows(sql, params=()):
-    with psycopg2.connect(database_url("runtime"), cursor_factory=RealDictCursor) as conn:
+    with connect(database_url("runtime"), cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
             return [dict(row) for row in cur.fetchall()]

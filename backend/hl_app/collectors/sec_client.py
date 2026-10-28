@@ -12,6 +12,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import psycopg2
 
+from ..db import connect
+
 GATE_KEY = "sec_edgar"
 LOCK_KEY = 0x53454347415445
 
@@ -84,7 +86,7 @@ class SECClient:
             raise SECError("SEC URL is outside the allowed endpoint boundary")
 
     def _connect(self):
-        return psycopg2.connect(self.database_url, connect_timeout=2, application_name="sec_request_gate")
+        return connect(self.database_url, connect_timeout=2, application_name="sec_request_gate")
 
     @contextmanager
     def _acquire(self, deadline: float):

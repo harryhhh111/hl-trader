@@ -22,8 +22,11 @@ class WebLifecycleLost(RuntimeError):
     pass
 
 
-def connect(url: str) -> connection:
-    return psycopg2.connect(url, connect_timeout=10)
+def connect(url: str, **kwargs) -> connection:
+    kwargs.setdefault("connect_timeout", 10)
+    conn = psycopg2.connect(url, **kwargs)
+    conn.set_client_encoding("UTF8")
+    return conn
 
 
 def _migration_files() -> list[tuple[str, str]]:

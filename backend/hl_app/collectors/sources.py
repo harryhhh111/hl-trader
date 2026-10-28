@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.request import Request, urlopen
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from ..db import connect
 from .announcements import (
     AnnouncementRecord,
     delete_recovery,
@@ -215,7 +215,7 @@ def collect_source(
     task_id = str(uuid.uuid4())
     issuer = source["issuer_identifier"]
     try:
-        with psycopg2.connect(url) as conn:
+        with connect(url) as conn:
             relations = _relations(conn, source)
         partial = False
         recovery_cursor = None
@@ -226,7 +226,7 @@ def collect_source(
             payload = sec_client.get(f"https://data.sec.gov/submissions/CIK{issuer}.json")
             records = parse_sec(payload, source)
             files = json.loads(payload).get("filings", {}).get("files", [])
-            with psycopg2.connect(url) as conn:
+            with connect(url) as conn:
                 previous = load_recovery(conn, source["source_id"], issuer)
             offset = int(previous[2]) if previous and previous[3] else 0
             selected = files[offset:offset + 2]
@@ -245,7 +245,7 @@ def collect_source(
             records = parse_feed(http_get(source["entry_url"]), source)
         inserted = revised = 0
         new_versions = []
-        with psycopg2.connect(url) as conn:
+        with connect(url) as conn:
             for record in records:
                 outcome, revision = upsert_announcement(conn, source["source_id"], issuer, relations, record, False, started)
                 inserted += outcome == "inserted"
@@ -263,12 +263,12 @@ def collect_source(
             for record, revision in new_versions:
                 try:
                     fields = enhancer(record, source["source_kind"], relations[0][0] if relations else "")
-                    with psycopg2.connect(url) as conn:
+                    with connect(url) as conn:
                         update_llm_fields(conn, source["source_id"], record.source_record_id, revision, **fields)
                 except Exception:
                     enhancement_failed += 1
         run_status = "partial" if partial or enhancement_failed else "success"
-        with psycopg2.connect(url) as conn:
+        with connect(url) as conn:
             if enhancement_failed:
                 record_attempt(conn, source["source_id"], issuer, "partial", "enhance_failed")
             insert_run(
@@ -286,7 +286,7 @@ def collect_source(
             "enhancement_failed": enhancement_failed,
         }
     except Exception as exc:
-        with psycopg2.connect(url) as conn:
+        with connect(url) as conn:
             record_attempt(conn, source["source_id"], issuer, "failed", type(exc).__name__)
             record_gap(conn, source["source_id"], issuer, started - timedelta(hours=1), started, "fetch_failed", str(exc)[:500])
             insert_run(conn, task_id, source["source_id"], issuer, "failed", started, error_class=type(exc).__name__, error_detail=str(exc)[:500])
@@ -294,7 +294,7 @@ def collect_source(
 
 
 def registered_sources(url: str) -> list[dict]:
-    with psycopg2.connect(url, cursor_factory=RealDictCursor) as conn:
+    with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -307,7 +307,7 @@ def registered_sources(url: str) -> list[dict]:
 
 
 def ensure_sec_sources(url: str) -> int:
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 "SELECT DISTINCT cik FROM securities s JOIN watchlist_items w ON w.security_id = s.id WHERE s.market = 'US' AND s.cik IS NOT NULL AND w.enabled = true"

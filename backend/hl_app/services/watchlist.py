@@ -6,8 +6,9 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
+
+from ..db import connect
 
 MARKETS = ("US", "CN_HK", "CN_A")
 CURRENCIES = {"US": "USD", "CN_HK": "HKD", "CN_A": "CNY"}
@@ -132,7 +133,7 @@ def summarize_quote(code: str, rows: list[dict], market_date: date) -> dict:
 
 
 def list_items(url: str) -> list[dict]:
-    with psycopg2.connect(url, cursor_factory=RealDictCursor) as conn:
+    with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
@@ -152,7 +153,7 @@ def list_items(url: str) -> list[dict]:
 
 
 def update_item(url: str, item_id: int, values: dict) -> dict:
-    with psycopg2.connect(url) as conn:
+    with connect(url) as conn:
         with conn.cursor() as cursor:
             from ..migration.common import BundleError
             from ..migration.service import business_write_guard
@@ -188,7 +189,7 @@ def quote_batch(url: str, market: str, codes: list[str], now: datetime | None = 
     current = now or datetime.now(timezone.utc)
     market_date = current.astimezone(ZoneInfo(TIMEZONES[market])).date()
     quotes = []
-    with psycopg2.connect(url, cursor_factory=RealDictCursor) as conn:
+    with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             for requested in codes:
                 code = canonical[requested]
