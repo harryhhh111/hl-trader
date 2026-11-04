@@ -299,7 +299,7 @@ GET  /api/v1/hyperliquid/pairs/{pair_id}/adjustments/managed-executions/{request
 
 ## 9. Docker 与部署变更
 
-- `compose.yaml` 为 Web 增加两个只读密钥文件挂载及对应 `_FILE` 配置。
+- `compose.managed-wallets.yaml` 为 Web 增加两个只读密钥文件挂载及对应 `_FILE` 配置；基础 `compose.yaml` 不持有这些密钥。
 - 默认示例不包含真实密钥；`.runtime/` 继续由 Git 忽略。
 - Web 保持 `read_only: true`。托管私钥通过 Linux memfd 和继承 fd 传递，不在 `/tmp`、命名卷或镜像中创建秘密文件。
 - 生产托管模式要求 Linux memfd 可用；不可用时拒绝保存和执行，不回退到磁盘文件。

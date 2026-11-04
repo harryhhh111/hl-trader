@@ -9,7 +9,7 @@
 - 单采集/增强 worker：常驻与 `--once` 共用独立固定锁，默认关闭。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
-Web 使用无 root 的独立 OS 身份，不挂载签名秘密；浏览器 API Wallet 在客户端持有私钥并签名，Web 只接收订单签名。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
+Web 使用无 root 的独立 OS 身份，默认不挂载签名秘密；浏览器 API Wallet 在客户端持有私钥并签名，Web 只接收订单签名。托管模式仅挂载加密密钥并接收浏览器加密后的私钥载荷，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
 
 `deploy/database.example.sql` 是角色示例，执行前先审查权限和默认 privileges。运行账号只有必要业务读写，不能 DDL，也不能修改认证、迁移或 operation control。
 
@@ -43,7 +43,7 @@ cd ..
 
 认证默认 `HL_APP_AUTH_MODE=token`，上述初始化与轮换流程不变。切换为 `cloudflare_access` 时，配置 `HL_APP_CF_TEAM_DOMAIN=https://<team>.cloudflareaccess.com` 和当前 Access Application 的 `HL_APP_CF_ACCESS_AUD`；Web 逐请求验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、签发方、AUD 和有效期，不能只信任邮箱请求头。此模式不需要应用 token 或执行 token 初始化/轮换。
 
-Web 配置 `HL_APP_TRADER_BIN`、`HL_APP_PAIRS_CONFIG`、可信 Origin、Secure cookie。只有 localhost 开发可显式关闭 Secure。生产 HTTPS 下保持 Secure。
+Web 配置 `HL_APP_TRADER_BIN`、`HL_APP_PAIRS_CONFIG`、可信 Origin、Secure cookie。只有 localhost 开发可显式关闭 Secure。生产 HTTPS 下保持 Secure。Docker 默认示例使用 HTTP 和 `Secure cookie=false`，应通过本机 localhost 或 SSH 端口转发访问；不能直接把 LAN 地址加入可信 Origin，LAN/公网入口必须另行配置 HTTPS、`Secure cookie=true` 和实际 Origin。
 
 ### Docker 可选真实调仓
 
@@ -125,7 +125,7 @@ npm run test:e2e
 npm audit
 ```
 
-E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动 390×844。真实来源/模型不属于默认回归。
+E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动 390×844。后端默认占用本机 8001 端口；已有服务占用时，可在 `frontend/` 下运行 `HL_APP_E2E_BACKEND_PORT=18001 npm run test:e2e`，不要停止现有服务。真实来源/模型不属于默认回归。
 
 ## 5. 预演与停写测量
 

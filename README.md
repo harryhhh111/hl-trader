@@ -49,7 +49,7 @@ Web 固定单进程，启动时持有 PostgreSQL 生命周期锁，不自动建�
 
 ### Docker Compose 本机空库部署
 
-`compose.yaml` 提供单进程 Web 和 Nginx，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`，采集 worker 不启动；当前仍使用 HTTP 和 `Secure cookie=false`，公网 HTTPS 配置需另行完成。
+`compose.yaml` 提供单进程 Web 和 Nginx，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`，采集 worker 不启动。默认示例使用 HTTP 和 `Secure cookie=false`，后端因此只接受 localhost 本机 Origin；LAN 或公网访问需另行配置 HTTPS、`Secure cookie=true` 和实际可信 Origin。
 
 ```sh
 mkdir -p .runtime
@@ -59,7 +59,7 @@ chmod 600 .runtime/docker.env
 docker compose --env-file .runtime/docker.env up --build -d
 ```
 
-从允许访问该内网地址的机器访问 `http://172.25.0.94:28080`。停止服务使用 `docker compose --env-file .runtime/docker.env down`；这不会停止或删除本机 PostgreSQL 中的数据。
+默认示例通过本机 `http://localhost:28080` 或 `http://127.0.0.1:28080` 访问；从其他机器操作时，先建立到该入口的 SSH 端口转发。直接把 `172.25.0.94` 加入可信 Origin 与 `Secure cookie=false` 模式不兼容。停止服务使用 `docker compose --env-file .runtime/docker.env down`；这不会停止或删除本机 PostgreSQL 中的数据。
 
 ### 可切换认证模式
 
@@ -238,7 +238,7 @@ Web 真实执行由浏览器中的 API Wallet 完成：后端生成每腿 Hyperl
 和 `wallet_version` 防止重放及覆盖新版本。系统禁止跨账户复用或重新导入已淘汰地址。托管调仓以持久化
 `request_id` 绑定预览、执行与审计，重复请求返回原状态，私钥仅通过 Linux memfd fd 传给 Rust，不写临时文件。
 
-旧 `adjust --execute` 文件签名模式仍保留给显式 CLI 操作，需要 `HL_APP_TRADING_ENABLED` 和 agent 私钥文件。
+显式 CLI 的 `adjust --execute` 直接要求 `--secret-file` 与 `--state-dir`，不读取 Web 环境开关；旧文件签名 Web API 则需要 `HL_APP_TRADING_ENABLED=true` 和 `HL_APP_AGENT_SECRET_FILE`。
 三种方式可切换，互不兜底。部署、密钥轮换与恢复见 [独立运行手册](docs/deployment/INDEPENDENT_APP.md)，
 完整设计见 [托管 API Wallet 技术方案](docs/HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)。
 
