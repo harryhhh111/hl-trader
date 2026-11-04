@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from psycopg2.extras import RealDictCursor
 
 from ..db import connect
+from ..migration.service import business_task, business_write_guard
 from ..services.watchlist import TIMEZONES
 
 TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -119,6 +120,15 @@ def collect_security(
     now: datetime | None = None,
     http_get: Callable[[str, dict[str, str]], dict] = _default_get,
 ) -> int:
+    with business_task(url) as check_active:
+        def checked_get(*args):
+            check_active()
+            return http_get(*args)
+
+        return _collect_security(url, security, now, checked_get, check_active)
+
+
+def _collect_security(url, security, now, http_get, check_active) -> int:
     with connect(url) as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT enabled FROM watchlist_items WHERE security_id = %s", (security["id"],))
@@ -131,8 +141,10 @@ def collect_security(
     if len([row for row in records if _number(row["close"]) is not None]) < 20:
         records = fetch_tencent_hist(security, current.date() - timedelta(days=365), current.date(), http_get)
     records = closed_records(records, security["market"], current)
+    check_active()
     with connect(url) as conn:
         with conn.cursor() as cursor:
+            business_write_guard(cursor)
             cursor.execute(
                 "SELECT enabled FROM watchlist_items WHERE security_id = %s FOR UPDATE",
                 (security["id"],),

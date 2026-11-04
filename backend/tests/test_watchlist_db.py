@@ -85,6 +85,7 @@ def test_collect_only_enabled_and_disable_recheck(seeded) -> None:
     disabled = dict(targets[0])
     with psycopg2.connect(seeded.migration_url) as conn:
         with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
             cursor.execute("UPDATE watchlist_items SET enabled = false WHERE security_id = %s", (disabled["id"],))
 
     def no_network(_url, _params):
@@ -94,6 +95,9 @@ def test_collect_only_enabled_and_disable_recheck(seeded) -> None:
 
 
 def test_known_quote_is_not_overwritten_by_missing_value(seeded) -> None:
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
     security = enabled_securities(seeded.runtime_url)[0]
 
     def fixture_get(_url, _params):

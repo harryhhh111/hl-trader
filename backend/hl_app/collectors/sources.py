@@ -12,6 +12,8 @@ from urllib.request import Request, urlopen
 from psycopg2.extras import RealDictCursor
 
 from ..db import connect
+from ..migration.common import BundleError
+from ..migration.service import business_task, business_write_guard
 from .announcements import (
     AnnouncementRecord,
     delete_recovery,
@@ -99,13 +101,29 @@ def parse_feed(payload: bytes, source: dict) -> list[AnnouncementRecord]:
 
 def parse_sec(payload: bytes, source: dict) -> list[AnnouncementRecord]:
     data = json.loads(payload)
-    recent = data.get("filings", {}).get("recent", {})
+    if not isinstance(data, dict):
+        raise ValueError("SEC submissions 必须是对象")
+    if "filings" in data:
+        filings = data["filings"]
+        if not isinstance(filings, dict):
+            raise ValueError("SEC filings 结构非法")
+        recent = filings.get("recent")
+    else:
+        # Additional submissions files contain column arrays directly at the top level.
+        recent = data
+    required = ("accessionNumber", "form", "filingDate", "primaryDocument")
+    if not isinstance(recent, dict) or any(not isinstance(recent.get(key), list) for key in required):
+        raise ValueError("SEC submissions 缺少申报字段数组")
+    count = len(recent["accessionNumber"])
     fields = ["accessionNumber", "form", "acceptanceDateTime", "filingDate", "primaryDocument", "primaryDocDescription"]
-    rows = zip(*(recent.get(field, []) for field in fields))
+    columns = [recent.get(field, [""] * count) for field in fields]
+    if any(not isinstance(column, list) or len(column) != count for column in columns):
+        raise ValueError("SEC submissions 字段数组长度不一致")
+    rows = zip(*columns)
     records = []
     for accession, form, accepted, filed, document, description in rows:
         if not accession or not document:
-            continue
+            raise ValueError("SEC 申报缺 accessionNumber 或 primaryDocument")
         raw_time = accepted or filed or ""
         published = None
         precision = "unknown"
@@ -211,12 +229,18 @@ def collect_source(
     now: datetime | None = None,
     enhancer=None,
 ) -> dict:
+    with business_task(url) as check_active:
+        return _collect_source(url, source, sec_client, http_get, now, enhancer, check_active)
+
+
+def _collect_source(url, source, sec_client, http_get, now, enhancer, check_active) -> dict:
     started = now or datetime.now(timezone.utc)
     task_id = str(uuid.uuid4())
     issuer = source["issuer_identifier"]
     try:
         with connect(url) as conn:
             relations = _relations(conn, source)
+        check_active()
         partial = False
         recovery_cursor = None
         recovery_start = started - timedelta(days=90)
@@ -231,6 +255,7 @@ def collect_source(
             offset = int(previous[2]) if previous and previous[3] else 0
             selected = files[offset:offset + 2]
             for file_info in selected:
+                check_active()
                 records.extend(parse_sec(sec_client.get(f"https://data.sec.gov/submissions/{file_info['name']}"), source))
             next_offset = offset + len(selected)
             partial = next_offset < len(files)
@@ -245,7 +270,10 @@ def collect_source(
             records = parse_feed(http_get(source["entry_url"]), source)
         inserted = revised = 0
         new_versions = []
+        check_active()
         with connect(url) as conn:
+            with conn.cursor() as cursor:
+                business_write_guard(cursor)
             for record in records:
                 outcome, revision = upsert_announcement(conn, source["source_id"], issuer, relations, record, False, started)
                 inserted += outcome == "inserted"
@@ -262,13 +290,22 @@ def collect_source(
         if enhancer is not None:
             for record, revision in new_versions:
                 try:
+                    check_active()
                     fields = enhancer(record, source["source_kind"], relations[0][0] if relations else "")
+                    check_active()
                     with connect(url) as conn:
+                        with conn.cursor() as cursor:
+                            business_write_guard(cursor)
                         update_llm_fields(conn, source["source_id"], record.source_record_id, revision, **fields)
+                except BundleError:
+                    raise
                 except Exception:
                     enhancement_failed += 1
         run_status = "partial" if partial or enhancement_failed else "success"
+        check_active()
         with connect(url) as conn:
+            with conn.cursor() as cursor:
+                business_write_guard(cursor)
             if enhancement_failed:
                 record_attempt(conn, source["source_id"], issuer, "partial", "enhance_failed")
             insert_run(
@@ -285,8 +322,13 @@ def collect_source(
             "partial": run_status == "partial",
             "enhancement_failed": enhancement_failed,
         }
+    except BundleError:
+        raise
     except Exception as exc:
+        check_active()
         with connect(url) as conn:
+            with conn.cursor() as cursor:
+                business_write_guard(cursor)
             record_attempt(conn, source["source_id"], issuer, "failed", type(exc).__name__)
             record_gap(conn, source["source_id"], issuer, started - timedelta(hours=1), started, "fetch_failed", str(exc)[:500])
             insert_run(conn, task_id, source["source_id"], issuer, "failed", started, error_class=type(exc).__name__, error_detail=str(exc)[:500])
@@ -309,6 +351,7 @@ def registered_sources(url: str) -> list[dict]:
 def ensure_sec_sources(url: str) -> int:
     with connect(url) as conn:
         with conn.cursor() as cursor:
+            business_write_guard(cursor)
             cursor.execute(
                 "SELECT DISTINCT cik FROM securities s JOIN watchlist_items w ON w.security_id = s.id WHERE s.market = 'US' AND s.cik IS NOT NULL AND w.enabled = true"
             )

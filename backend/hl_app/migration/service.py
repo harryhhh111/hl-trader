@@ -4,11 +4,13 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import psycopg2
 from psycopg2 import sql
 
 from ..db import connect
@@ -26,6 +28,7 @@ from .common import (
 )
 
 OPERATION_LOCK_KEY = 0x484C5F4F50455231
+BUSINESS_TASK_LOCK_KEY = 0x484C5F5441534B31
 SERIAL_TABLES = {
     "securities": "id",
     "watchlist_items": "id",
@@ -59,19 +62,70 @@ def assert_active(url: str) -> None:
         with conn.cursor() as cursor:
             _lock(cursor)
             if _mode(cursor) != "active":
-                raise BundleError("应用处于维护状态，暂停业务写入")
+                raise MaintenanceMode("应用处于维护状态，暂停业务写入")
 
 
-def maintenance(url: str) -> dict:
+class MaintenanceMode(BundleError):
+    pass
+
+
+@contextmanager
+def business_task(url: str):
+    """Register the entire fetch/enhancement task, including time outside DB transactions."""
+    with closing(_connect(url)) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock_shared(%s)", (BUSINESS_TASK_LOCK_KEY,))
+
+        def check_active() -> None:
+            try:
+                with conn.cursor() as cursor:
+                    if _mode(cursor) != "active":
+                        raise MaintenanceMode("应用处于维护状态，暂停采集和业务写入")
+            except psycopg2.Error as exc:
+                raise BundleError("采集任务锁连接失效，停止任务") from exc
+
+        check_active()
+        yield check_active
+
+
+def maintenance(url: str, timeout_seconds: float = 30) -> dict:
+    if not 0 < timeout_seconds <= 30:
+        raise ValueError("排空期限必须大于 0 且不超过 30 秒")
+    deadline = time.monotonic() + timeout_seconds
+    # Persist the gate before waiting for writers, so a timeout still leaves maintenance enabled.
     with closing(_connect(url)) as conn, conn:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_lock(%s)", (OPERATION_LOCK_KEY,))
             cursor.execute(
-                "UPDATE operation_control SET mode = 'maintenance', drain_deadline = now() + interval '30 seconds', updated_at = now() WHERE singleton = true"
+                "UPDATE operation_control SET mode = 'maintenance', drain_deadline = now() + %s * interval '1 second', updated_at = now() WHERE singleton = true",
+                (timeout_seconds,),
             )
-            cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND pid <> pg_backend_pid()")
-            active = cursor.fetchone()[0]
-    return {"mode": "maintenance", "drained": True, "other_active_sessions_at_exit": active}
+    with closing(_connect(url)) as conn:
+        conn.autocommit = True
+        while True:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s)", (OPERATION_LOCK_KEY,))
+                if cursor.fetchone()[0]:
+                    cursor.execute("SELECT pg_try_advisory_lock(%s)", (BUSINESS_TASK_LOCK_KEY,))
+                    if cursor.fetchone()[0]:
+                        if _mode(cursor) != "maintenance":
+                            raise BundleError("排空期间维护状态已变化，拒绝出具停写证明")
+                        cursor.execute("UPDATE operation_control SET drain_deadline = NULL WHERE singleton = true")
+                        return {"mode": "maintenance", "drained": True}
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (OPERATION_LOCK_KEY,))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"mode": "maintenance", "drained": False, "detail": "在途任务或写事务未排空；保持维护状态，请稍后重新排空"}
+            time.sleep(min(0.05, remaining))
+
+
+def _require_drained(cursor) -> None:
+    if _mode(cursor) != "maintenance":
+        raise BundleError("操作要求 maintenance")
+    # Caller already holds OPERATION_LOCK_KEY. Never wait here: an in-flight task may need it.
+    cursor.execute("SELECT pg_try_advisory_xact_lock(%s)", (BUSINESS_TASK_LOCK_KEY,))
+    if not cursor.fetchone()[0]:
+        raise BundleError("在途采集或增强任务未排空，拒绝导入或导出")
 
 
 def _current_rows(conn) -> dict[str, list[dict]]:
@@ -148,8 +202,7 @@ def import_bundle(url: str, path: Path, apply: bool) -> dict:
         with closing(_connect(url)) as conn:
             with conn.cursor() as cursor:
                 _lock(cursor)
-                if _mode(cursor) != "maintenance":
-                    raise BundleError("导入要求 maintenance")
+                _require_drained(cursor)
                 cursor.execute("SELECT bundle_id FROM migration_bundles WHERE bundle_id = %s", (bundle_id,))
                 if cursor.fetchone():
                     raise BundleError("该 bundle 已导入，dry-run 不执行重复导入")
@@ -159,8 +212,7 @@ def import_bundle(url: str, path: Path, apply: bool) -> dict:
     with closing(_connect(url)) as conn, conn:
         with conn.cursor() as cursor:
             _lock(cursor)
-            if _mode(cursor) != "maintenance":
-                raise BundleError("导入要求 maintenance")
+            _require_drained(cursor)
             cursor.execute("SELECT manifest_sha256 FROM migration_bundles WHERE bundle_id = %s", (bundle_id,))
             existing = cursor.fetchone()
             if existing:
@@ -209,8 +261,7 @@ def export_baseline(url: str, output: Path) -> dict:
     with closing(_connect(url)) as conn, conn:
         with conn.cursor() as cursor:
             _lock(cursor)
-            if _mode(cursor) != "maintenance":
-                raise BundleError("基线导出要求 maintenance")
+            _require_drained(cursor)
             full_id, full_hash, scope = _full_lineage(cursor)
             rows = _current_rows(conn)
             content_hash = business_hash(rows)
@@ -270,8 +321,7 @@ def activate(url: str, baseline_path: Path) -> dict:
                 raise BundleError("基线未注册或内容不匹配")
             if ledger[2] is not None:
                 return {"baseline_id": baseline_id, "mode": "active", "already_active": True}
-            if _mode(cursor) != "maintenance":
-                raise BundleError("只允许从 maintenance 激活")
+            _require_drained(cursor)
             if business_hash(_current_rows(conn)) != ledger[1]:
                 raise BundleError("基线后数据已变化，拒绝激活")
             cursor.execute(
@@ -288,8 +338,7 @@ def rollback_export(url: str, baseline_path: Path, output: Path) -> dict:
     with closing(_connect(url)) as conn, conn:
         with conn.cursor() as cursor:
             _lock(cursor)
-            if _mode(cursor) != "maintenance":
-                raise BundleError("回退导出要求 maintenance")
+            _require_drained(cursor)
             cursor.execute("SELECT cutover_baseline_id FROM operation_control WHERE singleton = true")
             if cursor.fetchone()[0] != baseline_id:
                 raise BundleError("不是当前注册的 cutover baseline")
@@ -353,4 +402,4 @@ def rollback_export(url: str, baseline_path: Path, output: Path) -> dict:
 def business_write_guard(cursor) -> None:
     _lock(cursor)
     if _mode(cursor) != "active":
-        raise BundleError("应用处于维护状态，暂停业务写入")
+        raise MaintenanceMode("应用处于维护状态，暂停业务写入")

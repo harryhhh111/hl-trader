@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timezone
 
 from ..db import connect
+from ..config import ConfigError
+from ..migration.service import MaintenanceMode, assert_active
 from ..collectors.quotes import collect_security, enabled_securities
 from ..collectors.sources import collect_source, ensure_sec_sources, registered_sources
 from ..collectors.sec_client import SECClient
@@ -23,13 +25,18 @@ class WorkerLifecycle:
         self.connection = None
 
     def acquire(self) -> None:
+        if self.connection is not None:
+            raise RuntimeError("worker lifecycle lock already acquired")
         conn = connect(self.url, connect_timeout=5)
         conn.autocommit = True
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT pg_try_advisory_lock(%s)", (WORKER_LIFECYCLE_LOCK_KEY,))
-            if not cursor.fetchone()[0]:
-                conn.close()
-                raise WorkerAlreadyRunning("另一个采集 worker 正在运行")
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s)", (WORKER_LIFECYCLE_LOCK_KEY,))
+                if not cursor.fetchone()[0]:
+                    raise WorkerAlreadyRunning("另一个采集 worker 正在运行")
+        except Exception:
+            conn.close()
+            raise
         self.connection = conn
 
     def ensure_healthy(self) -> None:
@@ -56,10 +63,18 @@ def enhance_record(record, source_kind: str, stock_code: str) -> dict:
     return ai.enhance_official(record.title, record.form_type, stock_code)
 
 
+def _enhancement_enabled() -> bool:
+    value = os.environ.get("HL_APP_ENHANCEMENT_ENABLED", "false").strip().lower()
+    if value not in {"true", "false"}:
+        raise ConfigError("HL_APP_ENHANCEMENT_ENABLED 必须是 true 或 false")
+    return value == "true"
+
+
 def dry_run(url: str) -> dict:
     return {
         "collectors_enabled": os.environ.get("HL_APP_COLLECTORS_ENABLED", "false") == "true",
         "scheduler_enabled": os.environ.get("HL_APP_SCHEDULER_ENABLED", "false") == "true",
+        "enhancement_enabled": _enhancement_enabled(),
         "tasks": ["quotes", "announcements", "news_enhancement"],
         "quote_targets": [row["stock_code"] for row in enabled_securities(url)],
         "sources": [
@@ -72,40 +87,59 @@ def dry_run(url: str) -> dict:
 def run_once(url: str, kind: str, http_get=None) -> dict:
     if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
         return {"status": "disabled", "kind": kind}
-    from ..migration.service import assert_active
-
-    assert_active(url)
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
     try:
-        if kind == "quotes":
-            results = []
-            for security in enabled_securities(url):
-                lifecycle.ensure_healthy()
-                results.append({security["stock_code"]: collect_security(url, security)})
-            return {"kind": kind, "results": results}
-        if kind != "announcements":
-            raise ValueError("kind 只支持 quotes 或 announcements")
-        ensure_sec_sources(url)
-        sources = registered_sources(url)
-        client = None
-        if any(source["source_kind"] == "sec" for source in sources):
-            client = SECClient(url, os.environ.get("HL_APP_SEC_USER_AGENT", ""))
-        results = []
-        kwargs = {} if http_get is None else {"http_get": http_get}
-        for source in sources:
-            lifecycle.ensure_healthy()
-            results.append(collect_source(url, source, sec_client=client, enhancer=enhance_record, **kwargs))
-        return {"kind": kind, "results": results}
+        return _run_once(url, kind, lifecycle, http_get)
     finally:
         lifecycle.close()
+
+
+def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) -> dict:
+    if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
+        return {"status": "disabled", "kind": kind}
+    lifecycle.ensure_healthy()
+    assert_active(url)
+    if kind == "quotes":
+        results = []
+        for security in enabled_securities(url):
+            lifecycle.ensure_healthy()
+            results.append({security["stock_code"]: collect_security(url, security)})
+        return {"kind": kind, "results": results}
+    if kind != "announcements":
+        raise ValueError("kind 只支持 quotes 或 announcements")
+    enhancer = enhance_record if _enhancement_enabled() else None
+    ensure_sec_sources(url)
+    sources = registered_sources(url)
+    client = None
+    if any(source["source_kind"] == "sec" for source in sources):
+        client = SECClient(url, os.environ.get("HL_APP_SEC_USER_AGENT", ""))
+    results = []
+    kwargs = {} if http_get is None else {"http_get": http_get}
+    for source in sources:
+        lifecycle.ensure_healthy()
+        results.append(collect_source(url, source, sec_client=client, enhancer=enhancer, **kwargs))
+    return {"kind": kind, "results": results}
 
 
 def run_scheduler(url: str) -> None:
     if os.environ.get("HL_APP_SCHEDULER_ENABLED", "false").lower() != "true":
         raise RuntimeError("HL_APP_SCHEDULER_ENABLED 未启用")
     interval = int(os.environ.get("HL_APP_COLLECTION_INTERVAL_SECONDS", "3600"))
-    while True:
-        run_once(url, "quotes")
-        run_once(url, "announcements")
-        time.sleep(max(60, interval))
+    lifecycle = WorkerLifecycle(url)
+    lifecycle.acquire()
+    try:
+        while True:
+            lifecycle.ensure_healthy()
+            try:
+                _run_once(url, "quotes", lifecycle)
+                _run_once(url, "announcements", lifecycle)
+            except MaintenanceMode:
+                # Stay idle with the lifecycle lock held until an explicit activation.
+                pass
+            deadline = time.monotonic() + max(60, interval)
+            while (remaining := deadline - time.monotonic()) > 0:
+                lifecycle.ensure_healthy()
+                time.sleep(min(5, remaining))
+    finally:
+        lifecycle.close()

@@ -8,6 +8,8 @@ import pytest
 from hl_app.collectors.sources import collect_source
 from hl_app.db import migrate
 from hl_app.services.ai import suggest_fields
+from hl_app import workers
+from hl_app.config import ConfigError
 from hl_app.workers import WorkerAlreadyRunning, WorkerLifecycle, dry_run, run_once
 
 from .conftest import PostgresNamespace
@@ -25,6 +27,7 @@ def seeded(postgres_namespace: PostgresNamespace, monkeypatch, tmp_path):
     monkeypatch.setenv("HL_APP_RESEARCH_REPO_PATH", str(tmp_path))
     with psycopg2.connect(postgres_namespace.migration_url) as conn:
         with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
             cursor.execute(
                 "INSERT INTO securities (market, stock_code, stock_name, currency, quote_source, quote_symbol, exchange_suffix, industry) VALUES ('US', 'ORCL', 'Oracle', 'USD', 'tencent', 'ORCL.N', '.N', '软件') RETURNING id"
             )
@@ -117,3 +120,63 @@ def test_worker_lifecycle_is_exclusive_and_dry_run_has_no_network(seeded) -> Non
 def test_disabled_once_does_no_collection(seeded, monkeypatch) -> None:
     monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", "false")
     assert run_once(seeded.runtime_url, "quotes") == {"status": "disabled", "kind": "quotes"}
+
+
+@pytest.mark.parametrize("setting", [None, "false", "true"])
+def test_worker_respects_enhancement_switch(seeded, monkeypatch, setting) -> None:
+    monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", "true")
+    if setting is None:
+        monkeypatch.delenv("HL_APP_ENHANCEMENT_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("HL_APP_ENHANCEMENT_ENABLED", setting)
+    calls = []
+
+    def enhance(*args):
+        calls.append(args)
+        return {"title_zh": "译文", "summary_zh": "摘要", "importance": "high"}
+
+    monkeypatch.setattr(workers, "enhance_record", enhance)
+    payload = b"<rss><channel><item><title>Raw</title><link>https://example.com/raw</link><guid>raw-1</guid></item></channel></rss>"
+    result = run_once(seeded.runtime_url, "announcements", http_get=lambda _url: payload)
+    assert result["results"][0]["enhancement_failed"] == 0
+    assert len(calls) == (1 if setting == "true" else 0)
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT title, title_zh, importance FROM watchlist_announcement")
+            assert cursor.fetchone() == (("Raw", "译文", "high") if setting == "true" else ("Raw", None, None))
+            cursor.execute("SELECT status FROM watchlist_announcement_run")
+            assert cursor.fetchone()[0] == "success"
+
+
+def test_invalid_enhancement_switch_rejects_collection(seeded, monkeypatch) -> None:
+    monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", "true")
+    monkeypatch.setenv("HL_APP_ENHANCEMENT_ENABLED", "maybe")
+    with pytest.raises(ConfigError, match="ENHANCEMENT_ENABLED"):
+        run_once(seeded.runtime_url, "announcements")
+
+
+def test_scheduler_holds_lock_while_idle_and_releases_on_exit(seeded, monkeypatch) -> None:
+    monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", "true")
+    monkeypatch.setenv("HL_APP_SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(workers, "enabled_securities", lambda _url: [])
+    monkeypatch.setattr(workers, "registered_sources", lambda _url: [])
+    monkeypatch.setattr(workers, "ensure_sec_sources", lambda _url: 0)
+
+    class StopScheduler(Exception):
+        pass
+
+    def sleep(_seconds):
+        with pytest.raises(WorkerAlreadyRunning):
+            run_once(seeded.runtime_url, "quotes")
+        with pytest.raises(WorkerAlreadyRunning):
+            workers.run_scheduler(seeded.runtime_url)
+        raise StopScheduler()
+
+    monkeypatch.setattr(workers.time, "sleep", sleep)
+    with pytest.raises(StopScheduler):
+        workers.run_scheduler(seeded.runtime_url)
+    after = WorkerLifecycle(seeded.runtime_url)
+    try:
+        after.acquire()
+    finally:
+        after.close()

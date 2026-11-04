@@ -43,6 +43,8 @@ def main() -> int:
     else:
         result = rollback_export(database_url("migration"), args.baseline, args.output)
     print(json.dumps(result, ensure_ascii=False, default=str))
+    if args.command == "maintenance" and not result["drained"]:
+        return 1
     return 0
 
 

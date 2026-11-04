@@ -62,7 +62,7 @@ manifest 固定 `bundle_version=1`，并包含：
 
 ## 4. 维护锁与激活
 
-`maintenance --enable` 取得固定 PostgreSQL 会话 advisory lock，先把模式设为 maintenance；新业务事务因此不能开始，既有事务在取得锁前排空。不能取得锁或排空超时时保持 maintenance，不出具停写证明。所有业务写入口和迁移管理共用固定锁协议；直接 SQL 只能用于用户确认的维护窗口。
+`maintenance --enable` 先提交 maintenance，阻止新采集任务与业务写事务，再最多等待 30 秒排空在途采集/增强任务和既有写事务。采集在网络与模型调用期间持有共享任务锁；行情、公告、增强、检查点及失败记录的每个写事务还须获取 operation lock 并重新检查 active。维护期间返回的网络或模型结果不再落库，也不写失败记录。排空超时保持 maintenance，输出 `drained=false` 并以非零状态退出；完成排空才返回 `drained=true`。导入、基线与回退导出另行核验任务已排空，不能仅凭 maintenance 模式导出。所有业务写入口和迁移管理共用固定锁协议；直接 SQL 只能用于用户确认的维护窗口。
 
 `export --purpose baseline` 要求 maintenance 和成功 full lineage。导出当前完整业务快照及 hash，先写私有临时目录，校验后原子发布，再登记 baseline ledger。目录登记失败不算有效基线。
 

@@ -34,6 +34,7 @@ def seeded(postgres_namespace: PostgresNamespace, monkeypatch):
     monkeypatch.setattr(announcements, "datetime", FixedDateTime)
     with psycopg2.connect(postgres_namespace.migration_url) as conn:
         with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
             for code, name in [("MU", "First"), ("WDC", "Second"), ("00001", "HK")]:
                 market = "US" if code != "00001" else "CN_HK"
                 currency = "USD" if market == "US" else "HKD"
@@ -158,14 +159,12 @@ def test_sec_budget_preserves_checkpoint_and_recovers_next_page(seeded) -> None:
                 }).encode()
             index = int(url.rsplit("-", 1)[1][0])
             return json.dumps({
-                "filings": {"recent": {
-                    "accessionNumber": [f"0001-26-00000{index}"],
-                    "form": ["8-K"],
-                    "acceptanceDateTime": ["2026-10-20T12:00:00Z"],
-                    "filingDate": ["2026-10-20"],
-                    "primaryDocument": ["a.htm"],
-                    "primaryDocDescription": ["Current report"],
-                }}
+                "accessionNumber": [f"0001-26-00000{index}"],
+                "form": ["8-K"],
+                "acceptanceDateTime": ["2026-10-20T12:00:00Z"],
+                "filingDate": ["2026-10-20"],
+                "primaryDocument": ["a.htm"],
+                "primaryDocDescription": ["Current report"],
             }).encode()
 
     source = {
@@ -183,6 +182,8 @@ def test_sec_budget_preserves_checkpoint_and_recovers_next_page(seeded) -> None:
             assert cursor.fetchone()[0] is None
             cursor.execute("SELECT cursor FROM watchlist_announcement_recovery WHERE source_id = 2")
             assert cursor.fetchone()[0] == "2"
+            cursor.execute("SELECT source_record_id FROM watchlist_announcement WHERE source_id = 2 ORDER BY source_record_id")
+            assert cursor.fetchall() == [("0001-26-000001",), ("0001-26-000002",)]
     second = collect_source(seeded.runtime_url, source, sec_client=FakeSEC(), now=NOW + timedelta(minutes=1))
     assert second["partial"] is False
     assert calls[-1].endswith("old-3.json")
@@ -191,4 +192,27 @@ def test_sec_budget_preserves_checkpoint_and_recovers_next_page(seeded) -> None:
             cursor.execute("SELECT checked_through FROM watchlist_announcement_check_state WHERE source_id = 2")
             assert cursor.fetchone()[0] is not None
             cursor.execute("SELECT COUNT(*) FROM watchlist_announcement_recovery WHERE source_id = 2")
+            assert cursor.fetchone()[0] == 0
+            cursor.execute("SELECT source_record_id FROM watchlist_announcement WHERE source_id = 2 ORDER BY source_record_id")
+            assert cursor.fetchall() == [("0001-26-000001",), ("0001-26-000002",), ("0001-26-000003",)]
+
+
+def test_bad_sec_history_does_not_advance_checkpoint(seeded) -> None:
+    class BadHistory:
+        def get(self, url):
+            if url.endswith("bad-history.json"):
+                return b'{}'
+            return json.dumps({"filings": {
+                "recent": {key: [] for key in ("accessionNumber", "form", "filingDate", "primaryDocument")},
+                "files": [{"name": "bad-history.json", "filingFrom": "2026-01-01"}],
+            }}).encode()
+
+    source = {"source_id": 1, "source_kind": "sec", "issuer_identifier": "0000001234", "parser_version": 1}
+    with pytest.raises(ValueError, match="申报字段数组"):
+        collect_source(seeded.runtime_url, source, sec_client=BadHistory(), now=NOW)
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT checked_through, last_attempt_status FROM watchlist_announcement_check_state")
+            assert cursor.fetchone() == (None, "failed")
+            cursor.execute("SELECT COUNT(*) FROM watchlist_announcement_recovery")
             assert cursor.fetchone()[0] == 0
