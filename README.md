@@ -47,6 +47,34 @@ cargo clippy --offline --all-targets -- -D warnings
 
 Web 固定单进程，启动时持有 PostgreSQL 生命周期锁，不自动建表或启动采集；新库业务状态默认为 maintenance。后端测试、前端开发服务器和 Rust CLI 均为本机开发入口，不代表部署或真实来源验收。
 
+### Docker Compose 本机空库部署
+
+`compose.yaml` 提供单进程 Web 和 Nginx，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`，采集 worker 不启动；当前仍使用 HTTP 和 `Secure cookie=false`，公网 HTTPS 配置需另行完成。
+
+```sh
+mkdir -p .runtime
+cp deploy/docker/runtime.env.example .runtime/docker.env
+chmod 600 .runtime/docker.env
+# 填写现有数据库连接、database 名称及随机秘密后：
+docker compose --env-file .runtime/docker.env up --build -d
+```
+
+从允许访问该内网地址的机器访问 `http://172.25.0.94:28080`。停止服务使用 `docker compose --env-file .runtime/docker.env down`；这不会停止或删除本机 PostgreSQL 中的数据。
+
+### 可切换认证模式
+
+默认 `HL_APP_AUTH_MODE=token`，保留数据库会话、token 初始化/轮换和 CSRF 校验。使用 Cloudflare Access 时在 `.runtime/docker.env` 设置：
+
+```sh
+HL_APP_AUTH_MODE=cloudflare_access
+HL_APP_CF_TEAM_DOMAIN=https://<team>.cloudflareaccess.com
+HL_APP_CF_ACCESS_AUD=<Access Application 的 AUD Tag>
+HL_APP_SECURE_COOKIE=true
+HL_APP_TRUSTED_ORIGINS=https://<应用域名>
+```
+
+Cloudflare 模式逐请求验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、签发方、AUD 和有效期，不信任可伪造的邮箱请求头；健康检查保持只读公开，业务 API 仍需有效 JWT。切换后重建 Web 容器即可，token 模式配置与能力保留。
+
 ## 构建
 
 需要 Rust 1.94+（开发用的是 stable 1.99）：
@@ -143,11 +171,13 @@ stdout 上限；非 0 退出码、超时或非法 JSON 均为失败，不伪造�
 ```sh
 # /path/to/pairs.json 见 hl-dashboard-pairs.example.json
 hl-trader --config /固定路径/pairs.json dashboard --pair nbis-crwv --json
+hl-trader --config /固定路径/pairs.json dashboard --pair nbis-crwv --address 0x<账户地址> --json
 hl-trader --config /固定路径/pairs.json dashboard --announcements --json
 ```
 
 - `--config` 在这个命令下是 **JSON pair 配置**；其他命令仍是原 TOML 交易配置。
-- `--pair <id>` 与 `--announcements` 二选一（clap 互斥），`--json` 必带。
+- `--pair <id>` 与 `--announcements` 二选一（clap 互斥），`--json` 必带；可选 `--address`
+  覆盖只读查询账户，必须是非零 EVM 地址。
 - 本命令使用独立配置解析器和只读 info 客户端：**不通过交易 load_config、不实例化
   签名器、不读 agent 私钥/receipt_dir、不获取交易锁**，只发 `/info` 类请求。
 - 交易 Adapter 与 `NETWORK` 常量仍为测试网；本命令的 mainnet/testnet 来自 pair 配置
@@ -177,6 +207,45 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 
 `config_revision` 为配置原始字节的 SHA-256（小写 hex）；采集结束会重读文件比对，
 中途被替换则明确报错（非 0），旧快照不会进入新配置缓存。
+
+独立 Web 的 pair 详情页可添加多个“名称 + 公开地址”并切换当前账户。账户存于
+`hyperliquid_pair_accounts`，每个 pair 至多一个当前地址，缓存按地址隔离；JSON 中已有的
+`account_address` 在首次添加时保留为“默认账户”。公开账户地址与托管 API Wallet 分表保存；托管私钥仅以密文入库。
+
+### 两腿目标仓位调整
+
+产品操作说明位于 Web 子页面 `/hyperliquid/adjustment-guide`，也可从 pair 详情页的“查看使用说明”进入。
+
+pair 详情页可输入每腿目标绝对名义（例如 `2000` USD），先按当前账户的实际仓位和最新盘口计算差额，
+再显示两腿交易方向、数量与 IOC 保护价。默认方向为配置第一腿多、第二腿空；已有反向持仓或目标腿挂单时拒绝。
+减仓使用 reduce-only，并先于增仓执行；目标为 `0` 时可平掉两腿。数量按市场精度向下取整，因此最终名义
+不保证与输入完全相等，差额低于交易所最小下单名义时不会发送订单。以目标 2000 USD 为例，
+当前 1990 USD 的 10 USD 差额会尝试生成增仓单（仍须通过精度和保护价校验）；当前 1995 USD
+的 5 USD 差额低于最低下单名义，整个预览会被拒绝，不会下单。
+
+```sh
+hl-trader --config /固定路径/pairs.json adjust --pair nbis-crwv \
+  --address 0x<当前账户> --notional 2000 --max-notional 15000 --json
+```
+
+Web 真实执行由浏览器中的 API Wallet 完成：后端生成每腿 Hyperliquid L1 action 的 EIP-712 typed data，
+页面通过 `eth_signTypedData_v4` 调起钱包逐腿签名，全部签名收集完成后才回传。后端恢复并核对签名地址、
+签名前后仓位和资产 ID 后才提交，明确拒绝原交易账户或其他钱包签名。API Wallet 私钥只导入浏览器钱包，
+不发送给服务器；原交易账户只需公开地址。持久回执目录由 `HL_APP_EXECUTION_STATE_DIR` 指定。
+
+也可在账户配置中添加托管 API Wallet：私钥经浏览器 AES-GCM＋RSA-OAEP 加密传输，后端再以 AES-256-GCM
+密文存入现有 PostgreSQL。保存和执行前通过固定网络官方 `userRole` 实时核对 Agent 归属；一次性 challenge
+和 `wallet_version` 防止重放及覆盖新版本。系统禁止跨账户复用或重新导入已淘汰地址。托管调仓以持久化
+`request_id` 绑定预览、执行与审计，重复请求返回原状态，私钥仅通过 Linux memfd fd 传给 Rust，不写临时文件。
+
+旧 `adjust --execute` 文件签名模式仍保留给显式 CLI 操作，需要 `HL_APP_TRADING_ENABLED` 和 agent 私钥文件。
+三种方式可切换，互不兜底。部署、密钥轮换与恢复见 [独立运行手册](docs/deployment/INDEPENDENT_APP.md)，
+完整设计见 [托管 API Wallet 技术方案](docs/HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)。
+
+每腿每次动作至多发送一笔 IOC；拒单、部分成交或配置变化会停止后续写操作，不自动追单或反向补偿。
+超时、断线、响应无法识别或成交后持仓核对不一致为 `unknown`，禁止直接重试，必须按 action ID、cloid、
+成交记录和实际持仓人工核对。回执按 pair＋账户隔离，发送前原子落盘，未完成或未知动作会阻止再次提交。
+两腿不是原子交易，目标仓位调整不等于无风险或保证完全成交。
 
 pair 语义（详见 docs/archive/PHASE2_PLAN.md §2/§3）：
 
@@ -218,7 +287,7 @@ allowed for this asset"）时接受该腿逐仓并打印警告，自担单腿独
 要求全仓。历史成交和资金费分页去重；
 成交按本 pair 的订单 ID 与已确认数量核对，缺失记录、分页无法推进或达到历史保留上限时不声称完整核算。
 
-交易命令端点硬编码为 `https://api.hyperliquid-testnet.xyz`，不支持主网写操作、不允许任意 URL 覆盖、不跟随重定向；v2 `dashboard` 的独立只读网络边界见上文。
+旧 `open/close/order/cancel/margin` 交易命令端点仍硬编码为 `https://api.hyperliquid-testnet.xyz`，不支持主网写操作；新 `adjust` 按受控 pair 配置选择固定官方 mainnet/testnet 端点，并支持 HIP-3 动态资产 ID。所有端点都不允许任意 URL 覆盖、不跟随重定向；v2 `dashboard` 的独立只读网络边界见上文。
 
 ## 语义与退出码
 
@@ -254,7 +323,7 @@ cargo test intel::announcements::tests::public_sources_smoke -- --ignored --noca
 ## 风险与已知限制（如实记录，docs/archive/PHASE2_PLAN.md §8）
 
 - **无自动再平衡**：两腿名义随价格漂移，极端时 pair 退化近似单腿敞口；看板显示漂移%，
-  由人决定是否 `close` 后重新 `open`（往返 taker 成本 ≈ 4×每腿名义比例×0.045% 权益）。
+  由人决定是否通过 `adjust` 预览并显式执行差额调仓；系统不会定时或自动交易。
 - 测试网验证不了主网的真实滑点、流动性与资金费水平；资金费净收付由当时两腿持仓和费率共同决定
   （费率正负决定多空收付方向，资金费每小时结算）。
 - 两腿及补偿均非原子操作，可能留下已知残仓或结果未知；本工具不承诺自动恢复为无敞口状态。

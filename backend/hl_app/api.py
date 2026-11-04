@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from .auth import AuthService
+from .auth import AuthService, CloudflareAccessService
 from .config import Settings
 from .db import WebLifecycle
 from .routes import ai, hyperliquid, news, session, watchlist
+from .services import hyperliquid_managed_adjustments
 
 
 @asynccontextmanager
@@ -21,9 +22,14 @@ async def lifespan(app: FastAPI):
     lifecycle.acquire()
     app.state.settings = settings
     app.state.web_lifecycle = lifecycle
-    app.state.auth = AuthService(
-        settings.database_url, settings.auth_token, settings.session_ttl_seconds
-    )
+    if settings.auth_mode == "cloudflare_access":
+        app.state.auth = CloudflareAccessService(
+            settings.cloudflare_team_domain, settings.cloudflare_access_aud
+        )
+    else:
+        app.state.auth = AuthService(
+            settings.database_url, settings.auth_token, settings.session_ttl_seconds
+        )
     shutdown_started = False
 
     def initiate_shutdown() -> None:
@@ -39,6 +45,7 @@ async def lifespan(app: FastAPI):
     app.state.initiate_shutdown = initiate_shutdown
     try:
         app.state.auth.verify_configuration()
+        hyperliquid_managed_adjustments.mark_interrupted_requests(settings.database_url)
         yield
     finally:
         lifecycle.close()

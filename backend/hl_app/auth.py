@@ -10,7 +10,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Mapping, Sequence
 
 import os
+import jwt
 from fastapi import HTTPException, Request
+from jwt.exceptions import PyJWKClientError, PyJWKSetError
 
 from .config import ConfigError, database_url, optional_value
 from .db import connect
@@ -19,6 +21,7 @@ AUTH_LOCK_KEY = 0x484C5F4155544831
 SESSION_COOKIE = "hl_session"
 CSRF_COOKIE = "hl_csrf"
 CSRF_HEADER = "x-csrf-token"
+CF_ACCESS_JWT_HEADER = "cf-access-jwt-assertion"
 
 
 class AuthError(RuntimeError):
@@ -41,6 +44,7 @@ class SessionInfo:
     csrf_sha256: str
     auth_epoch: int
     expires_at: datetime
+    email: str | None = None
 
 
 def _token_bytes(token: str) -> bytes:
@@ -209,6 +213,62 @@ class AuthService:
                 )
 
 
+class CloudflareAccessService:
+    def __init__(
+        self,
+        team_domain: str,
+        audience: str,
+        jwk_client: jwt.PyJWKClient | None = None,
+    ) -> None:
+        self._team_domain = team_domain
+        self._audience = audience
+        self._jwk_client = jwk_client or jwt.PyJWKClient(
+            f"{team_domain}/cdn-cgi/access/certs", timeout=5
+        )
+
+    def verify_configuration(self) -> None:
+        return None
+
+    def authenticate(self, assertion: str | None) -> SessionInfo:
+        if not assertion or len(assertion) > 8192:
+            raise AuthError(401, "缺少 Cloudflare Access 认证")
+        try:
+            key = self._jwk_client.get_signing_key_from_jwt(assertion)
+            claims = jwt.decode(
+                assertion,
+                key=key,
+                algorithms=["RS256"],
+                audience=self._audience,
+                issuer=self._team_domain,
+                leeway=30,
+                options={
+                    "require": ["aud", "email", "exp", "iat", "iss", "nbf", "type"]
+                },
+            )
+        except jwt.InvalidTokenError as exc:
+            raise AuthError(401, "Cloudflare Access 认证无效或已过期") from exc
+        except (PyJWKClientError, PyJWKSetError) as exc:
+            raise AuthError(503, "Cloudflare Access 验证暂不可用") from exc
+        email = claims.get("email")
+        if claims.get("type") != "app" or not isinstance(email, str) or not email.strip():
+            raise AuthError(401, "Cloudflare Access 用户身份无效")
+        return SessionInfo(
+            _hash(assertion),
+            "",
+            0,
+            datetime.fromtimestamp(claims["exp"], timezone.utc),
+            email.strip(),
+        )
+
+
+def authenticate_request(request: Request) -> SessionInfo:
+    if request.app.state.settings.auth_mode == "cloudflare_access":
+        credential = request.headers.get(CF_ACCESS_JWT_HEADER)
+    else:
+        credential = request.cookies.get(SESSION_COOKIE)
+    return request.app.state.auth.authenticate(credential)
+
+
 def check_csrf(request: Request, session: SessionInfo) -> None:
     cookie = request.cookies.get(CSRF_COOKIE, "")
     header = request.headers.get(CSRF_HEADER, "")
@@ -227,10 +287,13 @@ def require_session(request: Request) -> SessionInfo:
         request.app.state.initiate_shutdown()
         raise HTTPException(503, "Web 生命周期锁已失效") from exc
     try:
-        session = request.app.state.auth.authenticate(request.cookies.get(SESSION_COOKIE))
+        session = authenticate_request(request)
     except AuthError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
-    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+    if (
+        request.app.state.settings.auth_mode == "token"
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+    ):
         check_csrf(request, session)
     request.state.session = session
     return session

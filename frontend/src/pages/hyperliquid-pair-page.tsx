@@ -4,6 +4,9 @@ import { Flame, RefreshCw } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { EChartsWrapper } from '@/components/charts/echarts-wrapper';
+import { AccountSettings } from '@/components/hyperliquid/account-settings';
+import { PositionAdjustment } from '@/components/hyperliquid/position-adjustment';
+import { TradeHistory } from '@/components/hyperliquid/trade-history';
 import { PageHeader } from '@/components/layout/page-header';
 import {
   accountShort, dash, dexLabel, formatTime, NETWORK_LABEL, pctFromFraction, pctFromNumber,
@@ -21,10 +24,11 @@ import type { HlPairSnapshot, HlPairDescriptor, HlRatioPoint } from '@/lib/types
 
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail || error.message : error instanceof Error ? error.message : '请求失败';
 
-function BlockFrame({ title, block, hint, children }: {
+function BlockFrame({ title, block, hint, action, children }: {
   title: string;
   block: { status: string; diagnostics?: string[] } | null;
   hint?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const statusClass = block?.status === 'ok' ? 'bg-emerald-500/10 text-emerald-600'
@@ -34,9 +38,12 @@ function BlockFrame({ title, block, hint, children }: {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">{title}</CardTitle>
-          {block && <Badge variant="secondary" className={statusClass}>{statusText}</Badge>}
+          <div className="flex items-center gap-2">
+            {action}
+            {block && <Badge variant="secondary" className={statusClass}>{statusText}</Badge>}
+          </div>
         </div>
         {hint && <CardDescription>{hint}</CardDescription>}
       </CardHeader>
@@ -92,7 +99,7 @@ function RatioChart({ points, coins }: { points: HlRatioPoint[] | null; coins: [
   );
 }
 
-function DetailBody({ snapshot }: { snapshot: HlPairSnapshot }) {
+function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; configRevision: string }) {
   const { account, positions, funding, ratio, unlocks } = snapshot.blocks;
   const descriptor = snapshot.pair;
   const [first, second] = descriptor.coins;
@@ -101,7 +108,7 @@ function DetailBody({ snapshot }: { snapshot: HlPairSnapshot }) {
     <div className="space-y-4">
       <Card>
         <CardContent className="py-4 text-sm">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 md:grid-cols-4">
             <span>方向 <span className="font-medium">{positionLegsLabel(descriptor.coins, positions.items, positions.position_state)}</span>
               {positions.position_state === 'same_direction' && <span className="ml-1 text-xs text-amber-600">（同向持仓，非对冲）</span>}
             </span>
@@ -126,7 +133,12 @@ function DetailBody({ snapshot }: { snapshot: HlPairSnapshot }) {
         <p className="text-xs text-muted-foreground">数据截至 {dash(ratio.as_of_date)} UTC 收盘；当日 live {dash(ratio.live)}</p>
       </BlockFrame>
 
-      <BlockFrame title="仓位" block={positions} hint="按交易所实际持仓展示；缺项显示 —；保证金为交易所口径。">
+      <BlockFrame
+        title="仓位"
+        block={positions}
+        hint="按交易所实际持仓展示；缺项显示 —；保证金为交易所口径。"
+        action={<PositionAdjustment descriptor={descriptor} configRevision={configRevision} />}
+      >
         {positions.items == null
           ? <p className="text-muted-foreground">持仓不可用</p>
           : positions.items.length === 0
@@ -277,6 +289,8 @@ export function HyperliquidPairPage() {
             {identityOk && <span>查询时间 <span className="font-mono">{formatTime(snapshot!.queried_at)}</span></span>}
           </div>
 
+          <AccountSettings pairId={pairId} configRevision={directory.data!.config_revision} network={descriptor.network} />
+
           {snapshotQuery.isPending && <p className="text-muted-foreground">读取快照…</p>}
           {snapshotQuery.isError && !snapshot && (
             <Card><CardContent className="py-10 text-center text-rose-600" role="alert">
@@ -295,9 +309,10 @@ export function HyperliquidPairPage() {
               {snapshotQuery.isError && (
                 <p className="text-sm text-amber-600" role="alert">刷新失败（{errorText(snapshotQuery.error)}），显示上次读数（{formatTime(snapshot.queried_at)}）。</p>
               )}
-              <DetailBody snapshot={snapshot} />
+              <DetailBody snapshot={snapshot} configRevision={directory.data!.config_revision} />
             </>
           )}
+          <TradeHistory pairId={pairId} accountAddress={descriptor.account_address} />
         </>
       )}
     </div>

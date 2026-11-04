@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { HyperliquidPage } from "@/pages/hyperliquid-page";
+import { HyperliquidAdjustmentGuidePage } from "@/pages/hyperliquid-adjustment-guide-page";
 import { HyperliquidPairPage } from "@/pages/hyperliquid-pair-page";
 import { LoginPage } from "@/pages/login-page";
 import { WatchlistPage } from "@/pages/watchlist-page";
@@ -19,6 +20,10 @@ function ProtectedLayout() {
   if (!session.data?.authenticated) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
 
   async function logout() {
+    if (session.data?.auth_mode === "cloudflare_access") {
+      window.location.assign("/cdn-cgi/access/logout");
+      return;
+    }
     await sessionApi.logout();
     qc.clear();
     navigate("/login", { replace: true });
@@ -47,6 +52,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/hyperliquid" element={<HyperliquidPage />} />
+        <Route path="/hyperliquid/adjustment-guide" element={<HyperliquidAdjustmentGuidePage />} />
         <Route path="/hyperliquid/pairs/:pairId" element={<HyperliquidPairPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/news" element={<NewsPage />} />

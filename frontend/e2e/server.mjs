@@ -11,7 +11,7 @@ export function startStaticServer(port) {
     if (url.pathname.startsWith("/api/v1/")) {
       const proxy = http.request({
         hostname: "127.0.0.1",
-        port: 8001,
+        port: Number(process.env.HL_APP_E2E_BACKEND_PORT ?? 8001),
         path: url.pathname + url.search,
         method: request.method,
         headers: request.headers,

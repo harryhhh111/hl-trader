@@ -1,0 +1,100 @@
+name: hl-app
+
+x-web-image: &web-image
+  image: hl-app-web:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: web
+  extra_hosts:
+    - host.docker.internal:host-gateway
+    - c2-dev-app03:host-gateway
+
+x-app-schema: &app-schema
+  PGOPTIONS: -c search_path=hl_app
+
+services:
+  migrate:
+    <<: *web-image
+    restart: "no"
+    environment:
+      <<: *app-schema
+      HL_APP_MIGRATION_DATABASE_URL: ${HL_APP_MIGRATION_DATABASE_URL:?set in .runtime/docker.env}
+      HL_APP_AUTH_MODE: ${HL_APP_AUTH_MODE:-token}
+      HL_APP_AUTH_TOKEN: ${HL_APP_AUTH_TOKEN:-}
+    volumes:
+      - ./deploy/docker/initialize.py:/docker/initialize.py:ro
+    command: ["python", "/docker/initialize.py"]
+
+  db-grants:
+    <<: *web-image
+    restart: "no"
+    environment:
+      <<: *app-schema
+      HL_APP_MIGRATION_DATABASE_URL: ${HL_APP_MIGRATION_DATABASE_URL}
+    volumes:
+      - ./deploy/docker/grant-runtime.sql:/docker/grant-runtime.sql:ro
+      - ./deploy/docker/apply_grants.py:/docker/apply_grants.py:ro
+    command: ["python", "/docker/apply_grants.py"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    <<: *web-image
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *app-schema
+      HL_APP_DATABASE_URL: postgresql://hl_app_runtime:${HL_APP_RUNTIME_PASSWORD:?set in .runtime/docker.env}@host.docker.internal:5432/${HL_APP_DATABASE_NAME:?set in .runtime/docker.env}
+      HL_APP_AUTH_MODE: ${HL_APP_AUTH_MODE:-token}
+      HL_APP_AUTH_TOKEN: ${HL_APP_AUTH_TOKEN:-}
+      HL_APP_CF_TEAM_DOMAIN: ${HL_APP_CF_TEAM_DOMAIN:-}
+      HL_APP_CF_ACCESS_AUD: ${HL_APP_CF_ACCESS_AUD:-}
+      HL_APP_HOST: 0.0.0.0
+      HL_APP_PORT: 8000
+      HL_APP_SECURE_COOKIE: ${HL_APP_SECURE_COOKIE:-false}
+      HL_APP_TRUSTED_ORIGINS: ${HL_APP_TRUSTED_ORIGINS:-http://localhost:28080,http://127.0.0.1:28080}
+      HL_APP_TRADER_BIN: /usr/local/bin/hl-trader
+      HL_APP_PAIRS_CONFIG: /etc/hl-app/pairs.json
+      HL_APP_TRADING_ENABLED: "false"
+      HL_APP_MAX_LEG_NOTIONAL_USD: ${HL_APP_MAX_LEG_NOTIONAL_USD:-15000}
+      HL_APP_AGENT_SECRET_FILE: ""
+      HL_APP_EXECUTION_STATE_DIR: /var/lib/hl-trader
+      HL_APP_COLLECTORS_ENABLED: "false"
+      HL_APP_SCHEDULER_ENABLED: "false"
+      HL_APP_ENHANCEMENT_ENABLED: "false"
+    volumes:
+      - ./hl-dashboard-pairs.example.json:/etc/hl-app/pairs.json:ro
+      - hl-adjustment-state:/var/lib/hl-trader
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      db-grants:
+        condition: service_completed_successfully
+
+  gateway:
+    image: hl-app-gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gateway
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    ports:
+      - "172.25.0.94:28080:80"
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  hl-adjustment-state:

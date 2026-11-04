@@ -187,13 +187,29 @@ pub fn load_agent_signer(secret_path: &Path) -> Result<PrivateKeySigner, SecretE
     let bytes = Zeroizing::new(
         fs::read(secret_path).map_err(|e| SecretError::Io(secret_path.to_path_buf(), e))?,
     );
-    let text = std::str::from_utf8(&bytes)
+    parse_agent_signer(&bytes)
+}
+
+pub fn load_agent_signer_fd(fd: std::os::fd::RawFd) -> Result<PrivateKeySigner, SecretError> {
+    use std::io::Read as _;
+    use std::os::fd::FromRawFd as _;
+
+    let path = PathBuf::from(format!("/proc/self/fd/{fd}"));
+    let file = unsafe { fs::File::from_raw_fd(fd) };
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.take(4096)
+        .read_to_end(&mut bytes)
+        .map_err(|e| SecretError::Io(path, e))?;
+    parse_agent_signer(&bytes)
+}
+
+fn parse_agent_signer(bytes: &[u8]) -> Result<PrivateKeySigner, SecretError> {
+    let text = std::str::from_utf8(bytes)
         .map_err(|e| SecretError::Key(format!("不是 UTF-8 文本: {e}")))?;
     let hex = text.trim();
-    let signer = PrivateKeySigner::from_str(hex)
+    PrivateKeySigner::from_str(hex)
         .or_else(|_| PrivateKeySigner::from_str(&format!("0x{hex}")))
-        .map_err(|e| SecretError::Key(e.to_string()))?;
-    Ok(signer)
+        .map_err(|e| SecretError::Key(e.to_string()))
 }
 
 #[cfg(test)]
@@ -265,6 +281,17 @@ mod tests {
         let dir = tempdir();
         let p = write_secret(&dir, "ok.key", 0o600);
         assert!(load_agent_signer(&p).is_ok());
+    }
+
+    #[test]
+    fn accepts_inherited_secret_fd() {
+        use std::os::fd::IntoRawFd as _;
+
+        let dir = tempdir();
+        let p = write_secret(&dir, "fd.key", 0o600);
+        let fd = fs::File::open(p).unwrap().into_raw_fd();
+        let signer = load_agent_signer_fd(fd).unwrap();
+        assert_ne!(signer.address(), Address::ZERO);
     }
 
     #[test]

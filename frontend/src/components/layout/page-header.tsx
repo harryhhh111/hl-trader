@@ -10,8 +10,8 @@ interface Props {
 
 export function PageHeader({ icon: Icon, title, description, children }: Props) {
   return (
-    <div className="flex items-start justify-between pb-4 border-b">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-center gap-3">
         <div className="p-2 rounded-lg bg-primary/10 text-primary">
           <Icon className="h-5 w-5" />
         </div>

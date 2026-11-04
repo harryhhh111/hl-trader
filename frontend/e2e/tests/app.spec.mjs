@@ -29,6 +29,150 @@ test("登录、pair 切换、降级块与刷新失败保留旧读数", async ({ 
   await page.screenshot({ path: `${evidence}/${testInfo.project.name}-hyperliquid.png`, fullPage: true });
 });
 
+test("账户添加与调仓表单按需弹窗展示", async ({ page }) => {
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await expect(page.getByRole("heading", { name: "NBIS / CRWV" })).toBeVisible();
+  await expect(page.getByLabel("账户名称")).toHaveCount(0);
+  await expect(page.getByLabel("每腿目标名义")).toHaveCount(0);
+  await expect(page.getByText("托管 API Wallet", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "调整仓位", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
+
+  await page.getByRole("button", { name: "添加账户", exact: true }).click();
+  const accountDialog = page.getByRole("dialog", { name: "添加账户", exact: true });
+  await expect(accountDialog).toBeVisible();
+  await expect(accountDialog.getByLabel("账户名称")).toBeVisible();
+  await expect(accountDialog.getByLabel("账户地址")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(accountDialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "调整仓位", exact: true }).click();
+  const adjustmentDialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
+  await expect(adjustmentDialog).toBeVisible();
+  await expect(adjustmentDialog.getByLabel("每腿目标名义")).toHaveValue("2000");
+  await expect(adjustmentDialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
+  await adjustmentDialog.getByRole("button", { name: "关闭弹窗" }).click();
+  await expect(adjustmentDialog).toHaveCount(0);
+});
+
+test("pair 页面底部展示调仓交易历史", async ({ page }) => {
+  const actionId = `adjust-0x${"ab".repeat(16)}`;
+  await page.route("**/api/v1/hyperliquid/pairs/hype-btc/trade-history?*", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data: {
+      pair_id: "hype-btc",
+      account_address: "0x0000000000000000000000000000000000000001",
+      items: [{
+        action_id: actionId,
+        request_id: "4d37d2a5-1da5-47a1-a2ce-b17365ea566f",
+        execution_mode: "managed",
+        status: "succeeded",
+        target_notional: "2000",
+        created_at: "2026-11-04T02:00:00Z",
+        legs: [{
+          coin: "HYPE", position_side: "long", action: "buy", reduce_only: false,
+          order_qty: "10", protect_px: "41", status: "filled", confirmed_qty: "10",
+          avg_px: "40.5", oid: 12345, cloid: null, result: "全部成交",
+        }, {
+          coin: "BTC", position_side: "short", action: "sell", reduce_only: false,
+          order_qty: "0.02", protect_px: "100000", status: "filled", confirmed_qty: "0.02",
+          avg_px: "100100", oid: 12346, cloid: null, result: "全部成交",
+        }],
+        diagnostics: [],
+      }],
+      has_more: false,
+      skipped_reports: 0,
+    } }),
+  }));
+  await login(page);
+  await page.goto("/hyperliquid/pairs/hype-btc");
+
+  const history = page.getByRole("region", { name: `调仓 ${actionId}` });
+  await expect(history).toBeVisible();
+  await expect(history).toContainText("全部成交");
+  await expect(history).toContainText("12345");
+  await expect(history).toContainText("2000 USD");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
+});
+
+test("本地 API Wallet 签名不会上传或持久化私钥", async ({ page }) => {
+  const privateKey = `0x${"0".repeat(63)}1`;
+  const signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf";
+  const typedData = {
+    domain: { name: "Exchange", version: "1", chainId: "0x539", verifyingContract: "0x0000000000000000000000000000000000000000" },
+    types: {
+      Agent: [{ name: "source", type: "string" }, { name: "connectionId", type: "bytes32" }],
+      EIP712Domain: [
+        { name: "name", type: "string" }, { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" },
+      ],
+    },
+    primaryType: "Agent",
+    message: { source: "a", connectionId: `0x${"11".repeat(32)}` },
+  };
+  const report = (status) => ({
+    schema_version: 1,
+    status,
+    pair_id: "nbis-crwv",
+    network: "mainnet",
+    account_address: "0x0000000000000000000000000000000000000002",
+    target_notional: "2000",
+    config_revision: "test-revision",
+    action_id: status === "prepared" ? `adjust-0x${"22".repeat(16)}` : null,
+    expected_signer: status === "prepared" ? signer : null,
+    signing_requests: status === "prepared" ? [
+      { leg_index: 0, nonce: 1, typed_data: typedData },
+      { leg_index: 1, nonce: 2, typed_data: typedData },
+    ] : [],
+    legs: ["NBIS", "CRWV"].map((coin, index) => ({
+      coin,
+      position_side: index === 0 ? "long" : "short",
+      current_notional: "1500",
+      estimated_target_notional: "2000",
+      action: index === 0 ? "buy" : "sell",
+      reduce_only: false,
+      order_qty: "1",
+      protect_px: "100",
+      result: status === "succeeded" ? "filled" : null,
+      status: status === "succeeded" ? "filled" : null,
+    })),
+    diagnostics: [],
+  });
+  const adjustmentRequests = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/adjustments/")) adjustmentRequests.push(request.postData() ?? "");
+  });
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/preview", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: report("preview") }) }));
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/browser-prepare", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: report("prepared") }) }));
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/browser-submit", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: report("succeeded") }) }));
+
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await page.getByRole("button", { name: "调整仓位", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
+  await dialog.getByRole("button", { name: "预览调仓差额" }).click();
+  await dialog.getByLabel("API Wallet 私钥").fill(privateKey);
+  await dialog.getByRole("button", { name: "加载 API Wallet" }).click();
+  await expect(dialog.getByLabel("API Wallet 私钥")).toHaveValue("");
+  await expect(dialog.getByText("签名账户")).toContainText("0x7e5f");
+  await dialog.getByRole("button", { name: "本地签名并下单" }).click();
+  await expect(dialog.getByText("调仓已完成", { exact: true })).toBeVisible();
+
+  expect(adjustmentRequests).toHaveLength(3);
+  expect(adjustmentRequests.every((body) => !body.includes(privateKey))).toBe(true);
+  const submitted = JSON.parse(adjustmentRequests[2]);
+  expect(submitted.expected_signer).toBe(signer);
+  expect(submitted.signatures).toHaveLength(2);
+  expect(submitted.signatures.every((item) => /^0x[0-9a-f]{130}$/.test(item.signature))).toBe(true);
+  expect(await page.evaluate((key) => Object.values(localStorage).some((value) => value.includes(key)), privateKey)).toBe(false);
+});
+
 test("关注元数据编辑、AI 草稿修改保存且无新增移除分析入口", async ({ page }, testInfo) => {
   await login(page);
   await page.goto("/watchlist");

@@ -1,0 +1,7 @@
+services:
+  web:
+    environment:
+      HL_APP_TRADING_ENABLED: "true"
+      HL_APP_AGENT_SECRET_FILE: /run/hl-app/agent.key
+    volumes:
+      - ./.runtime/hl-agent.key:/run/hl-app/agent.key:ro

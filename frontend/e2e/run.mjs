@@ -52,9 +52,10 @@ try {
     HL_APP_SECURE_COOKIE: "false",
     HL_APP_TRUSTED_ORIGINS: "http://127.0.0.1:4173",
     HL_APP_HOST: "127.0.0.1",
-    HL_APP_PORT: "8001",
+    HL_APP_PORT: process.env.HL_APP_E2E_BACKEND_PORT ?? "8001",
     HL_APP_TRADER_BIN: seed.trader,
     HL_APP_PAIRS_CONFIG: seed.pairs,
+    HL_APP_EXECUTION_STATE_DIR: path.join(pg, "hl-state"),
     HL_APP_RESEARCH_REPO_PATH: seed.research,
     HL_APP_MMX_BIN: seed.mmx,
     HL_APP_MMX_MODEL: "fixture-model",
@@ -63,8 +64,8 @@ try {
   };
   background(`${root}/.venv/bin/python`, ["-m", "hl_app"], { cwd: root, env });
   staticServer = await startStaticServer(4173);
-  await ready("http://127.0.0.1:8001/api/v1/health");
-  await foreground(path.join(root, "frontend/node_modules/.bin/playwright"), ["test", "-c", path.join(root, "frontend/e2e/playwright.config.mjs")], { cwd: root, env });
+  await ready(`http://127.0.0.1:${env.HL_APP_PORT}/api/v1/health`);
+  await foreground(path.join(root, "frontend/node_modules/.bin/playwright"), ["test", "-c", path.join(root, "frontend/e2e/playwright.config.mjs"), ...process.argv.slice(2)], { cwd: root, env });
 } finally {
   if (staticServer) staticServer.close();
   for (const child of processes) child.kill("SIGTERM");

@@ -68,3 +68,42 @@ def test_invalid_port_is_rejected(port: str) -> None:
                 "HL_APP_PORT": port,
             }
         )
+
+
+def test_auth_mode_defaults_to_token_and_cloudflare_does_not_need_token() -> None:
+    token_settings = Settings.from_env(
+        {"HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl", "HL_APP_AUTH_TOKEN": AUTH}
+    )
+    assert token_settings.auth_mode == "token"
+    settings = Settings.from_env(
+        {
+            "HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl",
+            "HL_APP_AUTH_MODE": "cloudflare_access",
+            "HL_APP_CF_TEAM_DOMAIN": "https://team.cloudflareaccess.com",
+            "HL_APP_CF_ACCESS_AUD": "A" * 64,
+        }
+    )
+    assert settings.auth_mode == "cloudflare_access"
+    assert settings.auth_token is None
+    assert settings.cloudflare_access_aud == "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("HL_APP_CF_TEAM_DOMAIN", "http://team.cloudflareaccess.com"),
+        ("HL_APP_CF_TEAM_DOMAIN", "https://example.com"),
+        ("HL_APP_CF_TEAM_DOMAIN", "https://team.cloudflareaccess.com/path"),
+        ("HL_APP_CF_ACCESS_AUD", "not-an-aud"),
+    ],
+)
+def test_invalid_cloudflare_configuration_is_rejected(name: str, value: str) -> None:
+    environ = {
+        "HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl",
+        "HL_APP_AUTH_MODE": "cloudflare_access",
+        "HL_APP_CF_TEAM_DOMAIN": "https://team.cloudflareaccess.com",
+        "HL_APP_CF_ACCESS_AUD": "a" * 64,
+        name: value,
+    }
+    with pytest.raises(ConfigError, match=name):
+        Settings.from_env(environ)

@@ -112,6 +112,43 @@ export interface HlPairDirectory {
   pairs: HlPairDescriptor[];
 }
 
+export interface HlPairAccount {
+  id: number | null;
+  label: string;
+  address: string;
+  is_active: boolean;
+  source: 'config' | 'database';
+  created_at: string | null;
+}
+
+export interface HlPairAccounts {
+  pair_id: string;
+  accounts: HlPairAccount[];
+}
+
+export interface HlManagedWallet {
+  configured: boolean;
+  network: 'mainnet' | 'testnet';
+  pair_id: string;
+  account_address: string;
+  wallet_address: string | null;
+  wallet_version: number;
+  authorization_checked_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  active_execution: { request_id: string; status: 'running' | 'unknown' } | null;
+}
+
+export interface HlWalletChallenge {
+  challenge_id: string;
+  actor_binding: string;
+  operation: 'save' | 'rotate' | 'delete';
+  wallet_version: number;
+  key_id: string;
+  public_key: string;
+  algorithm: 'RSA-OAEP-3072';
+}
+
 export interface HlV2Position {
   coin: string;
   side: 'long' | 'short';
@@ -201,4 +238,97 @@ export interface HlV2Announcements {
   schema_version: 2;
   queried_at: string;
   block: HlAnnouncementsBlock;
+}
+
+export type HlAdjustmentStatus = 'preview' | 'prepared' | 'succeeded' | 'incomplete' | 'unknown';
+export type HlAdjustmentLegStatus = 'not_required' | 'prepared' | 'pending' | 'filled' | 'partially_filled' | 'rejected' | 'unknown';
+
+export interface HlAdjustmentLeg {
+  coin: string;
+  position_side: 'long' | 'short';
+  current_size: string;
+  current_notional: string;
+  mid_px: string;
+  target_size: string;
+  estimated_target_notional: string;
+  action: 'buy' | 'sell' | 'none';
+  order_qty: string;
+  protect_px: string;
+  reduce_only: boolean;
+  asset: number;
+  nonce: number | null;
+  cloid: string | null;
+  status: HlAdjustmentLegStatus;
+  confirmed_qty: string;
+  avg_px: string | null;
+  oid: number | null;
+  result: string | null;
+  final_size: string | null;
+  final_notional: string | null;
+}
+
+export interface HlSigningRequest {
+  leg_index: number;
+  nonce: number;
+  typed_data: Record<string, unknown>;
+}
+
+export interface HlAdjustmentReport {
+  schema_version: 1;
+  status: HlAdjustmentStatus;
+  action_id: string | null;
+  pair_id: string;
+  network: 'mainnet' | 'testnet';
+  config_revision: string;
+  account_address: string;
+  target_notional: string;
+  created_at: string;
+  legs: HlAdjustmentLeg[];
+  diagnostics: string[];
+  expected_signer?: string;
+  signing_requests?: HlSigningRequest[];
+  execution_enabled?: boolean;
+  browser_wallet_enabled?: boolean;
+  max_leg_notional_usd?: string;
+  request_id?: string;
+  wallet_address?: string;
+  wallet_version?: number;
+  managed_status?: 'previewed' | 'running' | 'succeeded' | 'incomplete' | 'failed' | 'unknown';
+  error_code?: string | null;
+}
+
+export type HlTradeHistoryStatus = 'running' | 'succeeded' | 'incomplete' | 'unknown';
+
+export interface HlTradeHistoryLeg {
+  coin: string;
+  position_side: 'long' | 'short';
+  action: 'buy' | 'sell' | 'none';
+  reduce_only: boolean;
+  order_qty: string;
+  protect_px: string;
+  status: HlAdjustmentLegStatus;
+  confirmed_qty: string;
+  avg_px: string | null;
+  oid: number | null;
+  cloid: string | null;
+  result: string | null;
+}
+
+export interface HlTradeHistoryItem {
+  action_id: string;
+  request_id: string | null;
+  execution_mode: 'managed' | 'browser' | 'server';
+  status: HlTradeHistoryStatus;
+  target_notional: string;
+  created_at: string;
+  legs: HlTradeHistoryLeg[];
+  diagnostics: string[];
+}
+
+export interface HlTradeHistory {
+  pair_id: string;
+  account_address: string;
+  items: HlTradeHistoryItem[];
+  has_more: boolean;
+  skipped_reports: number;
 }

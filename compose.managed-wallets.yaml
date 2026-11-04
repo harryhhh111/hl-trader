@@ -1,0 +1,25 @@
+services:
+  managed-key-init:
+    image: hl-app-web:local
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    volumes:
+      - hl-wallet-keys:/var/lib/hl-wallet-keys
+      - ./deploy/docker/initialize_managed_keys.py:/docker/initialize_managed_keys.py:ro
+    command: ["python", "/docker/initialize_managed_keys.py"]
+
+  web:
+    environment:
+      HL_APP_TRADING_ENABLED: "true"
+      HL_APP_DATA_ENCRYPTION_KEY_FILE: /run/hl-wallet-keys/data-encryption.key
+      HL_APP_DATA_ENCRYPTION_KEY_ID: ${HL_APP_DATA_ENCRYPTION_KEY_ID:-local-v1}
+      HL_APP_TRANSPORT_RSA_PRIVATE_KEY_FILE: /run/hl-wallet-keys/transport-rsa-private.pem
+    volumes:
+      - hl-wallet-keys:/run/hl-wallet-keys:ro
+    depends_on:
+      managed-key-init:
+        condition: service_completed_successfully
+
+volumes:
+  hl-wallet-keys:

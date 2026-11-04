@@ -1,0 +1,16 @@
+.git
+.gitignore
+.runtime
+.venv
+.hl-trader
+.env
+.env.*
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+target
+bundles
+baseline
+rollback
+docs/migration/evidence

@@ -620,11 +620,15 @@ def _cached(cache: dict, key: str):
     return None
 
 
-def get_pair_dashboard(pair_id: str) -> dict:
+def get_pair_dashboard(pair_id: str, database_url: str | None = None) -> dict:
     revision, pairs = load_pairs()
     descriptor = next((p for p in pairs if p["id"] == pair_id), None)
     if descriptor is None:
         raise LookupError(f"未知或停用的 pair: {pair_id}")
+    if database_url is not None:
+        from .hyperliquid_accounts import apply_active_accounts
+
+        descriptor = apply_active_accounts(database_url, [descriptor])[0]
     key = _cache_key("pair", revision, descriptor)
     lock = _key_lock(key)
     with lock:
@@ -632,7 +636,10 @@ def get_pair_dashboard(pair_id: str) -> dict:
         if hit is not None:
             return hit
         with _collector_sem:
-            snapshot = _run_dashboard(["--pair", pair_id])
+            collect_argv = ["--pair", pair_id]
+            if descriptor["account_address"] is not None:
+                collect_argv.extend(["--address", descriptor["account_address"]])
+            snapshot = _run_dashboard(collect_argv)
             snapshot = _validate_v2_snapshot(snapshot, descriptor, revision)
             _snapshot_cache[key] = {
                 "snapshot": snapshot,

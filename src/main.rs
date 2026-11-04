@@ -1,8 +1,9 @@
-//! hl-trader：Hyperliquid 测试网最小交易 CLI。
+//! hl-trader：Hyperliquid 看板与交易 CLI。
 //!
-//! 默认 dry-run（MVP_PLAN §4）：不加载私钥、不生成签名、不发送写请求。
-//! 下单和撤单必须显式加 --execute，且需要用户另外授权测试网联调。
+//! 默认 dry-run：不加载私钥、不生成签名、不发送写请求。
+//! 下单和撤单必须显式加 --execute；主网或测试网联调均需另外授权。
 
+mod adjust;
 mod config;
 mod dashboard;
 mod hyperliquid;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use config::{Config, NETWORK, load_agent_signer, load_config};
+use config::{Config, NETWORK, load_agent_signer, load_agent_signer_fd, load_config};
 use hyperliquid::{
     Adapter, AdapterError, CancelOutcome, OrderIntent, PlaceOutcome, TESTNET_API_URL, cloid_hex,
     parse_cloid,
@@ -35,10 +36,10 @@ const EXIT_UNKNOWN: u8 = 3;
 #[command(
     name = "hl-trader",
     version,
-    about = "Hyperliquid 测试网最小 CLI（默认 dry-run；--execute 才会签名提交）"
+    about = "Hyperliquid 看板与交易 CLI（默认 dry-run；--execute 才会签名提交）"
 )]
 struct Cli {
-    /// 配置文件路径（TOML；示例见 hl-trader.example.toml）。
+    /// 配置路径（旧命令用 TOML；dashboard/adjust 用多 pair JSON）。
     #[arg(long, global = true, default_value = "hl-trader.toml")]
     config: PathBuf,
 
@@ -125,11 +126,87 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
+    /// 把多 pair 两腿调整到每腿目标 USD 名义；默认只预览，--execute 才签名下单。
+    Adjust {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        notional: String,
+        #[arg(long)]
+        max_notional: String,
+        /// agent 私钥文件；仅 --execute 使用，dry-run 不读取。
+        #[arg(long, conflicts_with = "secret_fd")]
+        secret_file: Option<PathBuf>,
+        /// 托管 Web 传入的匿名内存文件描述符；仅 --execute 使用。
+        #[arg(long, requires = "execute")]
+        secret_fd: Option<std::os::fd::RawFd>,
+        /// pair + 账户隔离的调仓回执根目录；仅 --execute 使用。
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+        /// 托管请求的持久化 UUID；写入发送前回执。
+        #[arg(long, requires = "execute")]
+        request_id: Option<String>,
+        #[arg(long)]
+        execute: bool,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 从继承的匿名内存文件描述符派生 API Wallet 公开地址，不访问网络。
+    ApiWalletAddress {
+        #[arg(long)]
+        secret_fd: std::os::fd::RawFd,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 生成由浏览器 API Wallet 签名的调仓订单，不读取私钥、不发送订单。
+    AdjustPrepare {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        notional: String,
+        #[arg(long)]
+        max_notional: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 校验浏览器 API Wallet 签名并提交调仓订单，不读取私钥。
+    AdjustSubmit {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        notional: String,
+        #[arg(long)]
+        max_notional: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long)]
+        action_id: String,
+        /// JSON 数组：[{"leg_index":0,"signature":"0x..."}]。
+        #[arg(long)]
+        signatures: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
     /// 多 pair 主网只读看板（v2）：--config 是 JSON pair 配置；只读、不装载私钥。
     Dashboard {
         /// 采集指定 pair id 的快照；与 --announcements 二选一。
         #[arg(long, conflicts_with = "announcements")]
         pair: Option<String>,
+        /// 覆盖 pair 的只读查询账户；地址由后端从已配置账户中选择。
+        #[arg(long, requires = "pair", conflicts_with = "announcements")]
+        address: Option<String>,
         /// 只输出平台公告块（复用 v1 结构化采集）；与 --pair 二选一。
         #[arg(long, conflicts_with = "pair")]
         announcements: bool,
@@ -177,11 +254,89 @@ async fn main() -> ExitCode {
         }
         Commands::Open { notional, execute } => cmd_open(&config_path, notional, execute).await,
         Commands::Close { execute } => cmd_close(&config_path, execute).await,
+        Commands::Adjust {
+            pair,
+            address,
+            notional,
+            max_notional,
+            secret_file,
+            secret_fd,
+            state_dir,
+            request_id,
+            execute,
+            json: _,
+        } => {
+            cmd_adjust(
+                &config_path,
+                AdjustCommand {
+                    pair_id: pair,
+                    address,
+                    notional,
+                    max_notional,
+                    secret_file,
+                    secret_fd,
+                    state_dir,
+                    request_id,
+                    execute,
+                },
+            )
+            .await
+        }
+        Commands::ApiWalletAddress { secret_fd, json: _ } => cmd_api_wallet_address(secret_fd),
+        Commands::AdjustPrepare {
+            pair,
+            address,
+            notional,
+            max_notional,
+            state_dir,
+            signer,
+            json: _,
+        } => {
+            cmd_adjust_prepare(
+                &config_path,
+                BrowserCommand {
+                    pair_id: pair,
+                    address,
+                    notional,
+                    max_notional,
+                    state_dir,
+                    signer,
+                },
+            )
+            .await
+        }
+        Commands::AdjustSubmit {
+            pair,
+            address,
+            notional,
+            max_notional,
+            state_dir,
+            signer,
+            action_id,
+            signatures,
+            json: _,
+        } => {
+            cmd_adjust_submit(
+                &config_path,
+                BrowserCommand {
+                    pair_id: pair,
+                    address,
+                    notional,
+                    max_notional,
+                    state_dir,
+                    signer,
+                },
+                action_id,
+                signatures,
+            )
+            .await
+        }
         Commands::Dashboard {
             pair,
+            address,
             announcements,
             json: _,
-        } => cmd_dashboard_v2(&config_path, pair, announcements).await,
+        } => cmd_dashboard_v2(&config_path, pair, address, announcements).await,
         Commands::Margin {
             coin,
             leverage,
@@ -555,6 +710,7 @@ async fn cmd_status_json(config_path: &std::path::Path) -> ExitCode {
 async fn cmd_dashboard_v2(
     config_path: &std::path::Path,
     pair_id: Option<String>,
+    address: Option<String>,
     announcements: bool,
 ) -> ExitCode {
     if announcements {
@@ -581,13 +737,22 @@ async fn cmd_dashboard_v2(
         eprintln!("错误: 未知或已停用的 pair id \"{pair_id}\"");
         return ExitCode::from(EXIT_USAGE);
     };
+    let mut pair = pair.clone();
+    if let Some(raw) = address {
+        let address = match raw.parse::<Address>() {
+            Ok(address) if address != Address::ZERO => address,
+            Ok(_) => return usage_err("账户地址不允许零地址"),
+            Err(e) => return usage_err(format!("账户地址不是合法 EVM 地址: {e}")),
+        };
+        pair.descriptor.account_address = Some(format!("{address}").to_lowercase());
+    }
 
     let client = dashboard::client::InfoClient::new(pair.descriptor.network);
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let snapshot = dashboard::snapshot::collect_pair(&client, pair, &cfg.revision, now_ms).await;
+    let snapshot = dashboard::snapshot::collect_pair(&client, &pair, &cfg.revision, now_ms).await;
 
     // 采集结束重读配置：文件在中途被替换必须明确报错重试（旧快照不进新配置缓存）。
     match dashboard::config::revision_at(config_path) {
@@ -774,6 +939,287 @@ async fn cmd_cancel(
         }
         Err(e) => runtime_err(e),
     }
+}
+
+struct AdjustCommand {
+    pair_id: String,
+    address: String,
+    notional: String,
+    max_notional: String,
+    secret_file: Option<PathBuf>,
+    secret_fd: Option<std::os::fd::RawFd>,
+    state_dir: Option<PathBuf>,
+    request_id: Option<String>,
+    execute: bool,
+}
+
+fn valid_request_id(value: &str) -> bool {
+    value.len() == 36
+        && value.char_indices().all(|(index, character)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                character == '-'
+            } else {
+                character.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn cmd_api_wallet_address(secret_fd: std::os::fd::RawFd) -> ExitCode {
+    match load_agent_signer_fd(secret_fd) {
+        Ok(signer) => {
+            let output = serde_json::json!({
+                "schema_version": 1,
+                "address": format!("{}", signer.address()).to_lowercase(),
+            });
+            println!("{output}");
+            EXIT_OK.into()
+        }
+        Err(error) => usage_err(format!("API Wallet 私钥加载被拒绝: {error}")),
+    }
+}
+
+async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> ExitCode {
+    let AdjustCommand {
+        pair_id,
+        address,
+        notional,
+        max_notional,
+        secret_file,
+        secret_fd,
+        state_dir,
+        request_id,
+        execute,
+    } = command;
+    let config = match dashboard::config::load(config_path) {
+        Ok(config) => config,
+        Err(error) => return usage_err(format!("pair 配置错误: {error}")),
+    };
+    let pair = match config.enabled_pair(&pair_id) {
+        Some(pair) => pair,
+        None => return usage_err(format!("未知或停用的 pair: {pair_id}")),
+    };
+    let account = match address.parse::<Address>() {
+        Ok(account) if account != Address::ZERO => account,
+        Ok(_) => return usage_err("账户地址不能是零地址"),
+        Err(error) => return usage_err(format!("账户地址非法: {error}")),
+    };
+    let target = match notional.parse::<Decimal>() {
+        Ok(target) => target,
+        Err(error) => return usage_err(format!("--notional 非法: {error}")),
+    };
+    let maximum = match max_notional.parse::<Decimal>() {
+        Ok(maximum) => maximum,
+        Err(error) => return usage_err(format!("--max-notional 非法: {error}")),
+    };
+    if request_id
+        .as_deref()
+        .is_some_and(|value| !valid_request_id(value))
+    {
+        return usage_err("--request-id 必须是 UUID 格式");
+    }
+    let (signer, _writer_guard) = if execute {
+        let signer = match (secret_file, secret_fd) {
+            (Some(secret_file), None) => load_agent_signer(&secret_file),
+            (None, Some(secret_fd)) => load_agent_signer_fd(secret_fd),
+            _ => return usage_err("--execute 必须且只能提供 --secret-file 或 --secret-fd"),
+        };
+        let Some(_state_dir) = state_dir.as_ref() else {
+            return usage_err("--execute 必须显式提供 --state-dir");
+        };
+        let signer = match signer {
+            Ok(signer) => signer,
+            Err(error) => return usage_err(format!("私钥加载被拒绝: {error}")),
+        };
+        if signer.address() == account {
+            return usage_err("只允许使用与交易账户不同的 agent 私钥，拒绝主钱包私钥");
+        }
+        if let Err(error) = Adapter::check_clock() {
+            return runtime_err(error);
+        }
+        let guard = match write_lock::WriteLock::agent(signer.address()) {
+            Ok(guard) => guard,
+            Err(error) => return runtime_err(error),
+        };
+        (Some(signer), Some(guard))
+    } else {
+        (None, None)
+    };
+    let adapter = Adapter::for_network(pair.descriptor.network);
+    let request = adjust::AdjustRequest {
+        pair,
+        config_path,
+        config_revision: &config.revision,
+        account,
+        target_notional: target,
+        max_notional: maximum,
+        state_dir: state_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("")),
+        request_id: request_id.as_deref(),
+    };
+    match adjust::run_adjust(&adapter, signer.as_ref(), &request, execute).await {
+        Ok(report) => {
+            let code = match report.status {
+                adjust::AdjustmentStatus::Succeeded | adjust::AdjustmentStatus::Preview => EXIT_OK,
+                adjust::AdjustmentStatus::Unknown => EXIT_UNKNOWN,
+                _ => EXIT_ERROR,
+            };
+            match serde_json::to_string(&report) {
+                Ok(json) => println!("{json}"),
+                Err(error) => return runtime_err(format!("调仓结果序列化失败: {error}")),
+            }
+            ExitCode::from(code)
+        }
+        Err(adjust::AdjustError::Refused(message)) => usage_err(message),
+        Err(adjust::AdjustError::Unresolved(message)) => {
+            eprintln!("{message}");
+            ExitCode::from(EXIT_UNKNOWN)
+        }
+        Err(error) => runtime_err(error),
+    }
+}
+
+struct BrowserCommand {
+    pair_id: String,
+    address: String,
+    notional: String,
+    max_notional: String,
+    state_dir: PathBuf,
+    signer: String,
+}
+
+struct BrowserContext {
+    config: dashboard::config::DashboardConfig,
+    path: PathBuf,
+    pair: dashboard::config::DashboardPair,
+    account: Address,
+    target: Decimal,
+    maximum: Decimal,
+    state_dir: PathBuf,
+    signer: Address,
+}
+
+impl BrowserContext {
+    fn request(&self) -> adjust::AdjustRequest<'_> {
+        adjust::AdjustRequest {
+            pair: &self.pair,
+            config_path: &self.path,
+            config_revision: &self.config.revision,
+            account: self.account,
+            target_notional: self.target,
+            max_notional: self.maximum,
+            state_dir: &self.state_dir,
+            request_id: None,
+        }
+    }
+}
+
+fn load_browser_context(
+    config_path: &std::path::Path,
+    command: BrowserCommand,
+) -> Result<BrowserContext, ExitCode> {
+    let config = match dashboard::config::load(config_path) {
+        Ok(config) => config,
+        Err(error) => return Err(usage_err(format!("pair 配置错误: {error}"))),
+    };
+    let pair = match config.enabled_pair(&command.pair_id) {
+        Some(pair) => pair.clone(),
+        None => return Err(usage_err(format!("未知或停用的 pair: {}", command.pair_id))),
+    };
+    let account = match command.address.parse::<Address>() {
+        Ok(account) if account != Address::ZERO => account,
+        Ok(_) => return Err(usage_err("账户地址不能是零地址")),
+        Err(error) => return Err(usage_err(format!("账户地址非法: {error}"))),
+    };
+    let signer = match command.signer.parse::<Address>() {
+        Ok(signer) if signer != Address::ZERO && signer != account => signer,
+        Ok(_) => return Err(usage_err("签名地址必须是非零且不同于交易账户的 API Wallet")),
+        Err(error) => return Err(usage_err(format!("API Wallet 地址非法: {error}"))),
+    };
+    let target = match command.notional.parse::<Decimal>() {
+        Ok(target) => target,
+        Err(error) => return Err(usage_err(format!("--notional 非法: {error}"))),
+    };
+    let maximum = match command.max_notional.parse::<Decimal>() {
+        Ok(maximum) => maximum,
+        Err(error) => return Err(usage_err(format!("--max-notional 非法: {error}"))),
+    };
+    if let Err(error) = Adapter::check_clock() {
+        return Err(runtime_err(error));
+    }
+    Ok(BrowserContext {
+        config,
+        pair,
+        account,
+        target,
+        maximum,
+        state_dir: command.state_dir,
+        signer,
+        path: config_path.to_path_buf(),
+    })
+}
+
+fn adjust_result(result: Result<adjust::AdjustmentReport, adjust::AdjustError>) -> ExitCode {
+    match result {
+        Ok(report) => {
+            let code = match report.status {
+                adjust::AdjustmentStatus::Preview
+                | adjust::AdjustmentStatus::Prepared
+                | adjust::AdjustmentStatus::Succeeded => EXIT_OK,
+                adjust::AdjustmentStatus::Unknown => EXIT_UNKNOWN,
+                _ => EXIT_ERROR,
+            };
+            match serde_json::to_string(&report) {
+                Ok(json) => println!("{json}"),
+                Err(error) => return runtime_err(format!("调仓结果序列化失败: {error}")),
+            }
+            ExitCode::from(code)
+        }
+        Err(adjust::AdjustError::Refused(message)) => usage_err(message),
+        Err(adjust::AdjustError::Unresolved(message)) => {
+            eprintln!("{message}");
+            ExitCode::from(EXIT_UNKNOWN)
+        }
+        Err(error) => runtime_err(error),
+    }
+}
+
+async fn cmd_adjust_prepare(config_path: &std::path::Path, command: BrowserCommand) -> ExitCode {
+    let context = match load_browser_context(config_path, command) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    adjust_result(
+        adjust::prepare_browser_adjustment(&adapter, &context.request(), context.signer).await,
+    )
+}
+
+async fn cmd_adjust_submit(
+    config_path: &std::path::Path,
+    command: BrowserCommand,
+    action_id: String,
+    signatures: String,
+) -> ExitCode {
+    let context = match load_browser_context(config_path, command) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let signatures = match serde_json::from_str::<Vec<adjust::BrowserSignature>>(&signatures) {
+        Ok(signatures) => signatures,
+        Err(error) => return usage_err(format!("--signatures 不是合法签名 JSON: {error}")),
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    adjust_result(
+        adjust::submit_browser_adjustment(
+            &adapter,
+            &context.request(),
+            context.signer,
+            &action_id,
+            signatures,
+        )
+        .await,
+    )
 }
 
 async fn cmd_margin(

@@ -5,9 +5,9 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LoginPage } from "./login-page";
 
-function render(authenticated: boolean) {
+function render(authenticated: boolean, authMode?: "token" | "cloudflare_access") {
   const qc = new QueryClient();
-  qc.setQueryData(["session"], { authenticated });
+  qc.setQueryData(["session"], { authenticated, auth_mode: authMode });
   return renderToString(
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={["/login"]}>
@@ -29,4 +29,11 @@ test("登录页使用密码输入且不包含分析或股票新增入口", () =>
 
 test("已登录访问登录页发起重定向而不渲染表单", () => {
   assert.equal(render(true), "");
+});
+
+test("Cloudflare Access 模式不显示应用 token 表单", () => {
+  const html = render(false, "cloudflare_access");
+  assert.match(html, /需要 Cloudflare Access 登录/);
+  assert.match(html, /无需输入应用 token/);
+  assert.doesNotMatch(html, /type="password"/);
 });

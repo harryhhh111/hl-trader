@@ -14,7 +14,22 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  if (session.isPending) return <main>正在验证登录状态…</main>;
   if (session.data?.authenticated) return <Navigate to="/hyperliquid" replace />;
+  if (session.data?.auth_mode === "cloudflare_access") {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>需要 Cloudflare Access 登录</CardTitle>
+            <CardDescription>
+              请通过团队 Cloudflare Access 入口完成邮箱验证后再访问本应用，无需输入应用 token。
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </main>
+    );
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();

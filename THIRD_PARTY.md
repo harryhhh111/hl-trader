@@ -59,6 +59,8 @@ crates.io 固定版本使用。
 | uvicorn | BSD-3-Clause | 单进程 ASGI 服务 |
 | psycopg2 / psycopg2-binary | LGPL-3.0-or-later（含开源使用例外说明） | PostgreSQL 参数化访问、迁移和协调锁 |
 | PyYAML | MIT | 研究入口 YAML 安全解析与重复键/别名限制 |
+| PyJWT | MIT | Cloudflare Access JWT 的 RS256、AUD、ISS 与时间声明验证 |
+| cryptography | Apache-2.0 OR BSD-3-Clause | JWT RSA 验签及离线密钥测试 |
 | React / React DOM / React Router | MIT | 独立页面与路由 |
 | TanStack React Query | MIT | 前端请求状态与缓存 |
 | Vite / @vitejs/plugin-react / esbuild / TypeScript | MIT / MIT / MIT / Apache-2.0 | 前端构建与 Node 测试打包 |
@@ -67,6 +69,7 @@ crates.io 固定版本使用。
 | Tailwind CSS / tailwindcss-animate / PostCSS / Autoprefixer | MIT | 保留来源页面样式与生产 CSS 构建 |
 | lucide-react | ISC | 页面图标 |
 | Playwright | Apache-2.0 | 真实 Chromium 桌面/移动端交互验收 |
+| viem | MIT | 浏览器本地 API Wallet 地址派生与 EIP-712 签名 |
 
 精确安装版本见 `backend/requirements.lock` 和 `frontend/package-lock.json`。后续新增依赖在实际引入时补充。
 

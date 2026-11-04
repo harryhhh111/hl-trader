@@ -5,6 +5,7 @@
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -12,11 +13,17 @@ from fastapi.testclient import TestClient
 
 from hl_app.auth import require_session
 from hl_app.routes import hyperliquid
+from hl_app.services import hyperliquid_accounts as accounts
 from hl_app.services import hyperliquid_pairs as pairs
 from hl_app.services.process import HyperliquidUnavailable
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures' / 'hyperliquid'
 SNAPSHOT_FIXTURES = ['v2_snapshot_hype_btc.json', 'v2_snapshot_nbis_crwv.json']
+
+
+@pytest.fixture(autouse=True)
+def static_accounts(monkeypatch):
+    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors: descriptors)
 
 
 def load_fixture(name):
@@ -70,6 +77,7 @@ def test_bad_coin_degrades_only_affected_block_over_http(
     monkeypatch.setattr(pairs, '_run_dashboard', lambda _args: copy.deepcopy(snap))
     pairs.clear_runtime_cache()
     app = FastAPI()
+    app.state.settings = SimpleNamespace(database_url='postgresql://unused')
     app.include_router(hyperliquid.router, prefix='/api/v1')
     app.dependency_overrides[require_session] = lambda: None
     try:
@@ -147,6 +155,7 @@ def test_invalid_diagnostics_degrades_only_affected_v2_block_over_http(
     monkeypatch.setattr(pairs, '_run_dashboard', lambda _args: copy.deepcopy(snap))
     pairs.clear_runtime_cache()
     app = FastAPI()
+    app.state.settings = SimpleNamespace(database_url='postgresql://unused')
     app.include_router(hyperliquid.router, prefix='/api/v1')
     app.dependency_overrides[require_session] = lambda: None
     try:

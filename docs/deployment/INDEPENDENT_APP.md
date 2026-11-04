@@ -4,12 +4,12 @@
 
 ## 1. 组件与权限
 
-- Rust CLI：原交易功能保留；Web 仅执行固定 v2 dashboard 参数数组。
+- Rust CLI：原交易功能保留；Web 仅执行固定 dashboard/adjust 参数数组，不接受任意命令、URL、账户或私钥路径。
 - 单 FastAPI 进程：持有固定 Web advisory lock，不建表、不启动采集。禁止多 workers、滚动重叠和容器副本。
 - 单采集/增强 worker：常驻与 `--once` 共用独立固定锁，默认关闭。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
-Web 应使用与交易不同的 OS 身份，无 root、交易组或切换身份能力，不继承签名环境变量。交易配置、状态、回执、锁、源码、二进制及可替换父目录对 Web 不可写。只读 pair JSON 和二进制由受控身份管理。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
+Web 使用无 root 的独立 OS 身份，不挂载签名秘密；浏览器 API Wallet 在客户端持有私钥并签名，Web 只接收订单签名。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
 
 `deploy/database.example.sql` 是角色示例，执行前先审查权限和默认 privileges。运行账号只有必要业务读写，不能 DDL，也不能修改认证、迁移或 operation control。
 
@@ -41,7 +41,62 @@ cd ..
 
 管理进程注入 `HL_APP_MIGRATION_DATABASE_URL` 和 `HL_APP_AUTH_TOKEN`；Web 仅注入运行 DSN。轮换使用 `auth rotate`，不能只换环境变量。旧配置进程会拒绝读取数据。
 
+认证默认 `HL_APP_AUTH_MODE=token`，上述初始化与轮换流程不变。切换为 `cloudflare_access` 时，配置 `HL_APP_CF_TEAM_DOMAIN=https://<team>.cloudflareaccess.com` 和当前 Access Application 的 `HL_APP_CF_ACCESS_AUD`；Web 逐请求验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、签发方、AUD 和有效期，不能只信任邮箱请求头。此模式不需要应用 token 或执行 token 初始化/轮换。
+
 Web 配置 `HL_APP_TRADER_BIN`、`HL_APP_PAIRS_CONFIG`、可信 Origin、Secure cookie。只有 localhost 开发可显式关闭 Secure。生产 HTTPS 下保持 Secure。
+
+### Docker 可选真实调仓
+
+基础 `compose.yaml` 不挂载任何交易私钥。页面可预览差额，并由浏览器中的 API Wallet 完成订单签名；
+命名卷 `hl-adjustment-state` 用于保存 pair＋账户隔离的调仓回执，`HL_APP_EXECUTION_STATE_DIR`
+必须指向该卷。`HL_APP_MAX_LEG_NOTIONAL_USD` 是每腿目标名义硬上限，默认 15000，超过时拒绝而不是
+静默缩小目标。Cloudflare Access 仅允许需要交易权限的团队成员访问。
+
+使用前，由用户在 Hyperliquid 上为原交易账户授权独立 API Wallet，并把该 API Wallet 的私钥导入自己的
+浏览器钱包。不要把主钱包私钥、API Wallet 私钥、助记词或文件内容发到聊天、仓库、服务器或日志。
+Hyperliquid 按签名钱包共享 nonce；本应用要求每个账户和交易进程使用独立地址，禁止跨账户复用或重新使用
+已淘汰 Agent。页面逐腿生成 EIP-712 订单签名，全部签名完成后才提交；后端恢复签名地址并核对仓位和资产 ID。
+
+旧服务器签名模式只保留给显式 CLI/兼容 API。确有需要时，可把独立 agent 私钥放到
+`.runtime/hl-agent.key`（非符号链接、容器 UID 10001 所有、0600 或更严），并使用 override：
+
+```sh
+docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.trading.yaml up -d --build web gateway
+```
+
+override 设置 `HL_APP_TRADING_ENABLED=true` 和 `HL_APP_AGENT_SECRET_FILE=/run/hl-app/agent.key`，移除后
+重建 Web 即关闭该服务器签名入口。
+
+#### Docker 托管 API Wallet
+
+`compose.managed-wallets.yaml` 启用托管执行，并只向 Web 挂载数据加密密钥和 RSA 传输私钥。专用
+`hl-wallet-keys` Docker 卷由 UID 10001 所有；`managed-key-init` 幂等创建两个独立密钥，已有密钥不会被覆盖，
+不需要 sudo 或修改宿主机文件所有者。不要把密钥内容打印或粘贴到聊天：
+
+```sh
+docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.managed-wallets.yaml up -d --build web gateway
+```
+
+`HL_APP_DATA_ENCRYPTION_KEY_ID` 默认 `local-v1`，生产应设置明确版本。密钥卷必须独立加密备份，且不与数据库
+备份放在同一位置。丢失 DEK
+后已有密文不可恢复。托管私钥通过 memfd fd 传给 Rust，不写临时文件。保存与执行前会实时查询官方
+`userRole`；challenge 一次性消费，钱包版本变化或活动请求存在时拒绝变更。
+
+离线 DEK 轮换默认 dry-run，确认全部 active 密文可解密后才用 `--apply` 事务性重加密：
+
+```sh
+.venv/bin/python -m hl_app.wallet_keys rotate \
+  --old-key-file /secure/path/old-dek.key --new-key-file /secure/path/new-dek.key \
+  --old-key-id local-v1 --new-key-id local-v2
+# 上述 dry-run 成功后，追加 --apply 执行；再切换 Web 的 DEK 文件和 key_id 并重启。
+```
+
+轮换前暂停托管写入并备份；任一校验失败整体不提交。旧 DEK 离线保留用于旧备份恢复。若 DEK 和密文可能
+同时泄露，仅重加密不够：必须撤销相关 Agent，并用全新地址替换。详见
+[托管 API Wallet 技术方案](../HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)。
+
+离线 mock 通过不代表浏览器钱包、主网成交、流动性或 API Wallet 授权已验收，首次浏览器签名、真实钱包导入
+和主网小额联调必须另行明确授权。
 
 worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
 

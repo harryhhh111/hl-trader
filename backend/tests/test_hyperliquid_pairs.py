@@ -1,5 +1,6 @@
 """v2 多 pair 目录接口：配置校验与边界，无外部进程、无交易所查询。"""
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from hl_app.auth import require_session
 from hl_app.routes import hyperliquid
+from hl_app.services import hyperliquid_accounts as accounts
 from hl_app.services import hyperliquid_pairs as pairs
 
 ADDRESS = "0x7F2120F612B78D579197762196B8A202AB654096"
@@ -28,9 +30,11 @@ VALID = {
 def client(monkeypatch, tmp_path):
     config_file = tmp_path / 'hl-pairs.json'
     monkeypatch.setenv('HL_APP_PAIRS_CONFIG', str(config_file))
+    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors: descriptors)
     pairs.clear_cache()
     pairs.clear_runtime_cache()
     app = FastAPI()
+    app.state.settings = SimpleNamespace(database_url='postgresql://unused')
     app.include_router(hyperliquid.router, prefix='/api/v1')
     app.dependency_overrides[require_session] = lambda: None
     yield TestClient(app), config_file
@@ -215,7 +219,7 @@ def test_pair_dashboard_happy_path_and_cache(client, monkeypatch, runner):
     assert first.status_code == 200
     body = first.json()['data']
     assert body['schema_version'] == 2
-    assert calls == [["--pair", "nbis-crwv"]]
+    assert calls == [["--pair", "nbis-crwv", "--address", ADDRESS_LOWER]]
 
     second = client[0].get('/api/v1/hyperliquid/pairs/nbis-crwv/dashboard')
     assert second.status_code == 200
@@ -254,7 +258,7 @@ def test_identity_and_revision_mismatch_is_503(client, monkeypatch, runner, muta
     response = client[0].get('/api/v1/hyperliquid/pairs/nbis-crwv/dashboard')
     assert response.status_code == 503
     assert response.json()['detail'] == expect_detail
-    assert calls == [["--pair", "nbis-crwv"]]  # 失败不进缓存，但本次确实发起了采集
+    assert calls == [["--pair", "nbis-crwv", "--address", ADDRESS_LOWER]]  # 失败不进缓存，但本次确实发起了采集
 
 
 def test_failed_validation_not_cached(client, monkeypatch, runner):

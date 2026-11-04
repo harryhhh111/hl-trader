@@ -430,7 +430,7 @@ pub fn leg_notional(
     Ok(cap)
 }
 
-fn gen_cloid() -> Result<Cloid, PairError> {
+pub(crate) fn gen_cloid() -> Result<Cloid, PairError> {
     use std::io::Read as _;
     let mut bytes = [0u8; 16];
     fs::File::open("/dev/urandom")
@@ -446,7 +446,7 @@ fn now_utc() -> String {
 // ---------- 执行 ----------
 
 /// 一条腿的下单结果（交易所确认口径）。
-enum LegResult {
+pub(crate) enum LegResult {
     Filled {
         oid: u64,
         qty: Decimal,
@@ -462,17 +462,21 @@ enum LegResult {
 }
 
 /// 一条待发送的 IOC 腿（cloid 由调用方给出，与状态文件记录的意图一致）。
-struct LegSend<'m> {
-    market: &'m PerpMarket,
-    buy: bool,
-    qty: Decimal,
-    protect_px: Decimal,
-    reduce_only: bool,
-    cloid: Cloid,
+pub(crate) struct LegSend<'m> {
+    pub market: &'m PerpMarket,
+    pub buy: bool,
+    pub qty: Decimal,
+    pub protect_px: Decimal,
+    pub reduce_only: bool,
+    pub cloid: Cloid,
 }
 
 /// 发送单条 IOC 腿。
-async fn send_leg(adapter: &Adapter, signer: &PrivateKeySigner, leg: &LegSend<'_>) -> LegResult {
+pub(crate) async fn send_leg(
+    adapter: &Adapter,
+    signer: &PrivateKeySigner,
+    leg: &LegSend<'_>,
+) -> LegResult {
     let intent = OrderIntent {
         asset: leg.market.index,
         buy: leg.buy,

@@ -9,6 +9,7 @@ from ..auth import (
     SESSION_COOKIE,
     AuthService,
     SessionInfo,
+    authenticate_request,
     require_session,
 )
 
@@ -34,6 +35,8 @@ def _set_cookie(response: Response, request: Request, name: str, value: str, htt
 
 @router.post("/login")
 def login(body: LoginBody, request: Request, response: Response) -> dict:
+    if request.app.state.settings.auth_mode != "token":
+        raise HTTPException(400, "当前使用 Cloudflare Access 认证")
     auth: AuthService = request.app.state.auth
     try:
         credential = auth.login(body.token)
@@ -41,24 +44,39 @@ def login(body: LoginBody, request: Request, response: Response) -> dict:
         raise HTTPException(exc.status_code, exc.detail) from exc
     _set_cookie(response, request, SESSION_COOKIE, credential.session_token, True)
     _set_cookie(response, request, CSRF_COOKIE, credential.csrf_token, False)
-    return {"data": {"authenticated": True, "expires_at": credential.expires_at}}
+    return {
+        "data": {
+            "authenticated": True,
+            "expires_at": credential.expires_at,
+            "auth_mode": "token",
+        }
+    }
 
 
 @router.get("")
 def session(request: Request) -> dict:
-    auth: AuthService = request.app.state.auth
+    auth_mode = request.app.state.settings.auth_mode
     try:
-        info = auth.authenticate(request.cookies.get(SESSION_COOKIE))
+        info = authenticate_request(request)
     except AuthError as exc:
         if exc.status_code == 401:
-            return {"data": {"authenticated": False}}
+            return {"data": {"authenticated": False, "auth_mode": auth_mode}}
         raise HTTPException(exc.status_code, exc.detail) from exc
-    return {"data": {"authenticated": True, "expires_at": info.expires_at}}
+    return {
+        "data": {
+            "authenticated": True,
+            "expires_at": info.expires_at,
+            "auth_mode": auth_mode,
+            "email": info.email,
+        }
+    }
 
 
 @router.post("/logout")
 def logout(request: Request, response: Response, session: SessionInfo = Depends(require_session)) -> dict:
+    if request.app.state.settings.auth_mode != "token":
+        raise HTTPException(400, "请通过 Cloudflare Access 退出")
     request.app.state.auth.logout(session)
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(CSRF_COOKIE, path="/")
-    return {"data": {"authenticated": False}}
+    return {"data": {"authenticated": False, "auth_mode": "token"}}

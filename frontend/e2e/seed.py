@@ -17,8 +17,8 @@ from hl_app.db import migrate
 ROOT = Path(__file__).resolve().parents[2]
 PG_DIR = Path(sys.argv[1])
 PG_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 55440
-ADMIN = f"postgresql://postgres@/postgres?host={PG_DIR}&port={PG_PORT}"
-SCHEMA_URL = ADMIN + "&options=-csearch_path%3De2e"
+ADMIN = os.environ.get("HL_APP_E2E_ADMIN_URL", f"postgresql://postgres@/postgres?host={PG_DIR}&port={PG_PORT}")
+SCHEMA_URL = ADMIN + ("&" if "?" in ADMIN else "?") + "options=-csearch_path%3De2e"
 TOKEN = "a" * 64
 
 with psycopg2.connect(ADMIN) as conn:

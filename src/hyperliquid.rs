@@ -1,6 +1,6 @@
-//! Hyperliquid 测试网协议适配。
+//! Hyperliquid 协议适配。
 //!
-//! 只面向官方测试网端点；写操作默认 dry-run（见 main.rs），本模块的
+//! 只面向固定官方 mainnet/testnet 端点；写操作默认 dry-run（见 main.rs），本模块的
 //! place_order/cancel_oid 只在显式 --execute 路径上被调用。
 //! 金额与精度校验在本地完成：元数据缺失、非法精度、零/负值、超出名义上限
 //! 一律拒绝，不静默截断、不猜默认值。
@@ -9,13 +9,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hypersdk::Address;
-#[cfg(test)]
-use hypersdk::hypercore::Chain;
 use hypersdk::hypercore::types::*;
 use hypersdk::hypercore::{
-    self, ActionError, Cloid, HttpClient, OidOrCloid, PerpMarket, PrivateKeySigner,
+    ActionError, Chain, Cloid, HttpClient, OidOrCloid, PerpMarket, PrivateKeySigner,
 };
 use rust_decimal::Decimal;
+
+use crate::dashboard::config::Network;
 
 /// 官方测试网端点（MVP_PLAN §4：唯一允许的网络）。
 pub const TESTNET_API_URL: &str = "https://api.hyperliquid-testnet.xyz";
@@ -42,7 +42,7 @@ pub enum AdapterError {
     Permission(String),
     #[error("响应格式无法识别（结果未知）: {0}")]
     BadResponse(String),
-    #[error("测试网元数据中找不到交易对 {0}")]
+    #[error("市场元数据中找不到交易对 {0}")]
     UnknownCoin(String),
     #[error("系统时间异常: {0}")]
     Clock(String),
@@ -259,13 +259,21 @@ fn side_str(side: Side) -> &'static str {
 }
 
 impl Adapter {
-    /// 生产入口：官方测试网 + 受限 HTTP 客户端（禁重定向、带超时）。
-    pub fn testnet() -> Self {
-        let client = hypercore::testnet().with_http_client(build_http_client());
+    /// 生产入口：固定官方网络 + 受限 HTTP 客户端（禁重定向、带超时）。
+    pub fn for_network(network: Network) -> Self {
+        let client = HttpClient::new(match network {
+            Network::Mainnet => Chain::Mainnet,
+            Network::Testnet => Chain::Testnet,
+        })
+        .with_http_client(build_http_client());
         Self {
             client,
             nonces: AtomicU64::new(0),
         }
+    }
+
+    pub fn testnet() -> Self {
+        Self::for_network(Network::Testnet)
     }
 
     /// 测试专用入口：指向本地 mock 服务器。不暴露给 CLI。
@@ -307,6 +315,27 @@ impl Adapter {
         self.client.perps().await.map_err(classify_info_error)
     }
 
+    pub async fn perp_markets_for(
+        &self,
+        dex: Option<&str>,
+    ) -> Result<Vec<PerpMarket>, AdapterError> {
+        let Some(name) = dex else {
+            return self.perp_markets().await;
+        };
+        let dex = self
+            .client
+            .perp_dexes()
+            .await
+            .map_err(classify_info_error)?
+            .into_iter()
+            .find(|item| item.name() == name)
+            .ok_or_else(|| AdapterError::UnknownCoin(name.to_string()))?;
+        self.client
+            .perps_from(dex)
+            .await
+            .map_err(classify_info_error)
+    }
+
     pub async fn market(&self, coin: &str) -> Result<MarketView, AdapterError> {
         let perps = self.perp_markets().await?;
         let m = find_market(&perps, coin)?;
@@ -325,14 +354,22 @@ impl Adapter {
     }
 
     pub async fn account(&self, user: Address) -> Result<AccountView, AdapterError> {
+        self.account_for(user, None).await
+    }
+
+    pub async fn account_for(
+        &self,
+        user: Address,
+        dex: Option<&str>,
+    ) -> Result<AccountView, AdapterError> {
         let state = self
             .client
-            .clearinghouse_state(user, None)
+            .clearinghouse_state(user, dex.map(str::to_string))
             .await
             .map_err(classify_info_error)?;
         let orders = self
             .client
-            .open_orders(user, None)
+            .open_orders(user, dex.map(str::to_string))
             .await
             .map_err(classify_info_error)?;
         Ok(AccountView {
@@ -391,6 +428,50 @@ impl Adapter {
             .place(signer, batch, nonce, None, None)
             .await
             .map_err(classify_action_error)?;
+        let status = statuses
+            .into_iter()
+            .next()
+            .ok_or_else(|| AdapterError::BadResponse("下单响应中没有任何订单状态".into()))?;
+        Ok(match status {
+            OrderResponseStatus::Resting { oid, .. } => PlaceOutcome::Resting { oid },
+            OrderResponseStatus::Filled {
+                oid,
+                total_sz,
+                avg_px,
+            } => PlaceOutcome::Filled {
+                oid,
+                total_sz,
+                avg_px,
+            },
+            OrderResponseStatus::Error(e) => PlaceOutcome::Rejected(e),
+            other => {
+                return Err(AdapterError::BadResponse(format!(
+                    "未预期的订单状态: {other:?}"
+                )));
+            }
+        })
+    }
+
+    pub async fn place_signed_order(
+        &self,
+        request: hypersdk::hypercore::api::ActionRequest,
+    ) -> Result<PlaceOutcome, AdapterError> {
+        use hypersdk::hypercore::api::{OkResponse, Response};
+
+        let response = self
+            .client
+            .send(request)
+            .await
+            .map_err(|error| classify_message(&format!("{error:#}"), true))?;
+        let statuses = match response {
+            Response::Ok(OkResponse::Order { statuses }) => statuses,
+            Response::Err(message) => return Err(AdapterError::Unknown(message)),
+            other => {
+                return Err(AdapterError::BadResponse(format!(
+                    "下单响应类型无法识别: {other:?}"
+                )));
+            }
+        };
         let status = statuses
             .into_iter()
             .next()

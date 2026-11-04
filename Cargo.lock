@@ -2940,6 +2940,7 @@ dependencies = [
 name = "hl-trader"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "anyhow",
  "chrono",
  "clap",

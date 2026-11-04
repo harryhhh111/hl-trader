@@ -46,7 +46,12 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 }
 
 export const sessionApi = {
-  session: () => apiFetch<{ authenticated: boolean; expires_at?: string }>("/api/v1/session"),
+  session: () => apiFetch<{
+    authenticated: boolean;
+    expires_at?: string;
+    auth_mode?: "token" | "cloudflare_access";
+    email?: string | null;
+  }>("/api/v1/session"),
   login: (token: string) => apiFetch<{ authenticated: boolean; expires_at: string }>("/api/v1/session/login", {
     method: "POST",
     body: JSON.stringify({ token }),
@@ -58,6 +63,111 @@ export const hyperliquidPairsApi = {
   directory: () => apiFetch<import("@/lib/types/hyperliquid").HlPairDirectory>("/api/v1/hyperliquid/pairs"),
   pairDashboard: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairSnapshot>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/dashboard`,
+  ),
+  tradeHistory: (pairId: string, accountAddress: string) => apiFetch<import("@/lib/types/hyperliquid").HlTradeHistory>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/trade-history?account_address=${encodeURIComponent(accountAddress)}`,
+  ),
+  accounts: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccounts>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts`,
+  ),
+  addAccount: (pairId: string, label: string, address: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccount>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts`,
+    { method: "POST", body: JSON.stringify({ label, address }) },
+  ),
+  activateAccount: (pairId: string, accountId: number) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccount>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts/${accountId}/activate`,
+    { method: "PUT" },
+  ),
+  previewAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/preview`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  executeAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+    confirmation: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/execute`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  prepareBrowserAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+    expected_signer: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/browser-prepare`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  submitBrowserAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+    expected_signer: string;
+    action_id: string;
+    signatures: { leg_index: number; signature: string }[];
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/browser-submit`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  managedWallet: (pairId: string, accountAddress: string) => apiFetch<import("@/lib/types/hyperliquid").HlManagedWallet>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/api-wallet?account_address=${encodeURIComponent(accountAddress)}`,
+  ),
+  walletChallenge: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    operation: 'save' | 'rotate' | 'delete';
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlWalletChallenge>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/api-wallet/challenge`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  saveManagedWallet: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    payload: Record<string, unknown>;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlManagedWallet>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/api-wallet`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
+  deleteManagedWallet: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    operation: 'delete';
+    challenge_id: string;
+    wallet_address: string;
+    wallet_version: number;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlManagedWallet>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/api-wallet/delete`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  previewManagedAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+    request_id: string;
+    wallet_version: number;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-preview`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  executeManagedAdjustment: (pairId: string, body: {
+    target_notional: string;
+    account_address: string;
+    config_revision: string;
+    request_id: string;
+    wallet_version: number;
+    confirmation: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-execute`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  managedAdjustment: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
   ),
   announcements: () => apiFetch<import("@/lib/types/hyperliquid").HlV2Announcements>("/api/v1/hyperliquid/announcements"),
 };
