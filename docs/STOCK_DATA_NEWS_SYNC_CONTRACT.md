@@ -30,8 +30,9 @@
 - 不传输正文，不新增正文提炼，不共享财务、全市场行情、研究资料或交易数据。
 - `hl-trader` 行情仍由自己的 worker 独立采集。
 - 正向 full 迁移、baseline、rollback delta 继续使用 `docs/migration/DATA_CONTRACT.md`；本 API 不是通用增量合并、CDC 或回退通道。
-- bootstrap 只回填每个逻辑公告的最高 revision 和来源当前快照，不包含完整历史 revision、run、recovery 或 gap 明细，因此**不能替代 full 导入**。
-- v1 首版增量消费要求目标已完成 full 导入并保留历史 revision。若要支持空库仅靠 bootstrap 启动，必须另审数据合同，不在本片隐式扩张。
+- bootstrap 只回填每个逻辑公告的最高 revision 和来源当前快照，不包含完整历史 revision、run、recovery 或 gap 明细，因此**不能替代 full 导入**；空库启动后的数据完整性和回退能力不得按 full 迁移宣称。
+- v1 同时支持两种明确入口：已完成 full 导入的既有库继续增量；全新空业务库通过 bootstrap 建立当前快照。空库不需要伪造 full lineage，但必须在同步状态中持久化 `bootstrap_in_progress`，直到固定上界的全部页面提交完成。
+- 空库 bootstrap 允许直接接收每个逻辑公告的最高 revision，并把它作为本地首条快照；这只表示“从上游当前版本开始”，不补造上游历史 revision。bootstrap 完成后，缺失本地逻辑公告却直接收到 revision>1 仍是错误。
 - 一个 `hl-trader` 数据库在 v1 只绑定一个 `source_instance`，不合并多个上游。
 
 ## 3. HTTP 接口
@@ -101,7 +102,7 @@ Accept: application/json
 | --- | --- |
 | 事件身份 | `sync_seq: int`、`event_kind: "source"` |
 | 来源自然键 | `source_id: int`、`market: str`、`source_kind: str`、`platform: str|null`、`issuer_identifier: str`、`entry_url: str` |
-| 来源配置 | `source_timezone: str|null`、`parser_version: int`、`interval_minutes: int|null`、`enabled: bool`、`source_status: str`、`status_reason: str|null` |
+| 来源配置 | `allowed_domain: str`、`source_timezone: str|null`、`parser_version: int`、`interval_minutes: int|null`、`enabled: bool`、`source_status: str`、`status_reason: str|null` |
 | 检查状态 | `effective_interval_minutes: int|null`、`last_attempt_at: str|null`、`last_attempt_status: str|null`、`last_success_at: str|null`、`next_due_at: str|null`、`checked_through: str|null`、`last_error_class: str|null` |
 | gap 汇总 | `open_gaps: int`、`earliest_gap_start: str|null` |
 
@@ -163,7 +164,7 @@ Accept: application/json
 - 新 revision 追加不可变行，不覆盖旧 revision。
 - 同 revision 的标题、URL、内容 hash、发布时间等原始字段不一致时拒绝；`content_hash=null` 时比较完整原始字段，不能把 null 当作任意内容都相同。
 - 相同原始 revision 的 `relation`/`llm` 重放可更新允许变化的关联、`last_seen_at` 和增强字段。
-- 目标完全缺少该逻辑公告时，只接受 `revision=1`。直接收到 revision>1 说明 bootstrap 被误当 full 或历史依赖缺失，整页失败。
+- 已完成 bootstrap/full 的目标完全缺少某逻辑公告时，只接受 `revision=1`；直接收到 revision>1 说明历史依赖缺失，整页失败。`bootstrap_in_progress=true` 的空库初始化例外：可接收上游为该逻辑公告提供的最高 revision 作为本地首条快照，但不补造更低 revision，也不把它登记为 full lineage。
 - 目标已有更高 revision，而上游事件要求回写较低 revision 的原始字段时拒绝；不得让旧事件覆盖当前展示版本。
 - 新 revision 的关联仍锚定该逻辑公告的首版。`relation` 及携带关联的条目事件以上游 `relations` 为完整快照，在该逻辑公告范围内核对新增与消失项，不影响其他公告。
 - 关联表没有证券外键；按 `(market, stock_code)` 原样保存上游关联及理由。页面继续只展示目标当前启用关注项，不因同步自动新增/启用关注证券。
@@ -176,12 +177,13 @@ Accept: application/json
 
 以来源自然键 `(market, source_kind, issuer_identifier, entry_url)` 查找目标 `watchlist_announcement_source`，再持久化 `(source_instance, upstream_source_id) → local_source_id` 映射。映射后校验两边自然键仍一致。
 
-当前 API 不含 `allowed_domain`、`query_config` 等目标建来源所需完整字段，因此：
+`NewsSource` 必须显式携带 `allowed_domain`，且其值必须与 `entry_url` 的 HTTPS 主机一致；源侧需同步补充该 DTO 字段和 fixture。目标按以下规则处理：
 
 - full 已迁入的来源可以映射并更新。
-- 未知来源、自然键变化或映射冲突必须停止本页并报警。
-- 不得用空字符串伪造 `allowed_domain`，不得自动注册新来源或自动解除 blocked/pending。
-- 新来源先由受控管理流程在目标注册，再恢复同步。
+- 空库 bootstrap 遇到未知来源时，可在 `ingest_mode=stock_data` 下自动注册来源和映射；不得因此把来源加入本机直接 SEC/IR/媒体采集队列，也不得把上游 blocked/pending 自动改成可直接采集。
+- 已完成初始化的库遇到未知来源，仍须先经受控管理流程注册，再恢复同步。
+- 自然键变化、域名不一致或映射冲突必须停止本页并报警；不得用空字符串伪造 `allowed_domain`。
+- 上游同步来源不需要本机直接采集所用的 `query_config`；不得为了兼容直接采集而伪造查询配置。
 
 来源配置写入现有 source 表；检查字段在 `effective_interval_minutes` 非 null 时写入现有 check_state，全部为 null 时表示尚无检查状态，不创建假记录。
 
@@ -195,7 +197,7 @@ v1 只有 `open_gaps` 和 `earliest_gap_start`，没有各 gap 的自然键、�
 
 建议新增以下目标私有状态表：
 
-- `hl_news_sync_state`：绑定的 `source_instance`、最新 `next_cursor`、`snapshot_at`、`last_sync_seq`、最近尝试/成功时间和安全错误摘要。
+- `hl_news_sync_state`：绑定的 `source_instance`、最新 `next_cursor`、`snapshot_at`、`last_sync_seq`、`bootstrap_in_progress`、bootstrap 固定上界、最近尝试/成功时间和安全错误摘要。只有首次无 cursor 且尚无事件收据时才可进入 bootstrap；中断后按已保存 cursor 和固定上界续传，直到 `has_more=false` 的最后一页提交后才清除该标志。
 - `hl_news_sync_event_receipt`：第 6 节的事件收据。
 - `hl_news_sync_source_map`：保存上游来源 ID 到本地来源 ID 的映射。
 - 上游来源状态投影表：保存上述 `local_source_id` 和 gap 汇总等字段。
@@ -264,7 +266,8 @@ python -m pytest \
 - 无 token/错误 token、400/401/422/429/500/503、超时、非法 JSON、未知字段、超限响应均不推进 cursor。
 - 两页固定 upper 期间上游新增事件不混入；空页保存 cursor；下一轮能读到新事件。
 - 页内第 N 条失败时整页回滚；重试幂等；同 sync_seq 不同 payload 拒绝。
-- source_instance 改变、未知来源、自然键冲突、缺失首版但 revision>1、同 revision 内容冲突均拒绝。
+- 空库 bootstrap 可接收最高 revision、自动注册仅限上游模式的来源，并在中断后续传；完成后不得补造历史 revision 或 full lineage。
+- source_instance 改变、自然键冲突、域名不一致、同 revision 内容冲突均拒绝；初始化完成后缺失本地逻辑公告但 revision>1 仍拒绝，非 bootstrap 的未知来源也拒绝。
 - relation 新增/消失按快照核对，共 CIK 证券不串号，不自动启用关注项。
 - LLM 事件只更新指定 revision；重放不重复写；上游模式无本地资讯模型调用。
 - 页提交与 cursor 同事务；第二个 worker 拒绝；maintenance 阻止新请求和在途结果落库。
