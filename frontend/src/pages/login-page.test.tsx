@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LoginPage } from "./login-page";
 
-function render(authenticated: boolean, authMode?: "token" | "cloudflare_access" | "account") {
+function render(authenticated: boolean, authMode: "token" | "cloudflare_access" | "account" | "unknown" = "token") {
   const qc = new QueryClient();
   qc.setQueryData(["session"], { authenticated, auth_mode: authMode });
   return renderToString(
@@ -47,4 +47,11 @@ test("账号模式提供登录和网页注册，不需要管理命令", () => {
   assert.match(html, /aria-label="密码"/);
   assert.match(html, /独立的 Hyperliquid 账户、托管钱包和调仓记录/);
   assert.doesNotMatch(html, /登录 token/);
+});
+
+
+test("未知认证模式不会回退显示 token 登录", () => {
+  const html = render(false, "unknown");
+  assert.match(html, /无法识别当前认证模式/);
+  assert.doesNotMatch(html, /管理员提供的随机登录 token/);
 });

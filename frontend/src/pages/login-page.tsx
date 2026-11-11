@@ -19,6 +19,9 @@ export function LoginPage() {
   const location = useLocation();
 
   if (session.isPending) return <main>正在验证登录状态…</main>;
+  if (session.isError) {
+    return <main className="min-h-screen flex items-center justify-center p-4" role="alert">认证服务暂不可用，请稍后刷新重试。</main>;
+  }
   if (session.data?.authenticated) return <Navigate to="/hyperliquid" replace />;
 
   async function finish() {
@@ -121,6 +124,10 @@ export function LoginPage() {
         </Card>
       </main>
     );
+  }
+
+  if (session.data?.auth_mode !== "token") {
+    return <main className="min-h-screen flex items-center justify-center p-4" role="alert">无法识别当前认证模式，请刷新后重试。</main>;
   }
 
   return (
