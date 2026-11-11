@@ -6,7 +6,7 @@
 
 - Rust CLI：原交易功能保留；Web 仅执行固定 dashboard/adjust 参数数组，不接受任意命令、URL、账户或私钥路径。
 - 单 FastAPI 进程：持有固定 Web advisory lock，不建表、不启动采集。禁止多 workers、滚动重叠和容器副本。
-- 单采集/增强 worker：常驻与 `--once` 共用独立固定锁，默认关闭。
+- 单 worker：股票采集/增强与 Pair 风险只读监控共用固定生命周期锁；常驻与 `--once` 互斥。股票采集默认关闭，风险监控由独立开关控制，worker 不持有交易私钥。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
 Web 使用无 root 的独立 OS 身份，默认不挂载签名秘密；浏览器 API Wallet 在客户端持有私钥并签名，Web 只接收订单签名。托管模式仅挂载加密密钥并接收浏览器加密后的私钥载荷，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
@@ -100,13 +100,16 @@ docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.managed
 离线 mock 通过不代表浏览器钱包、主网成交、流动性或 API Wallet 授权已验收，首次浏览器签名、真实钱包导入
 和主网小额联调必须另行明确授权。
 
-worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
+非 Docker worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`、`HL_APP_RISK_MONITOR_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
 
 ```sh
 .venv/bin/python -m hl_app.workers --once --kind quotes
 .venv/bin/python -m hl_app.workers --once --kind announcements
+.venv/bin/python -m hl_app.workers --once --kind pair_risk
 .venv/bin/python -m hl_app.workers --run
 ```
+
+Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`，但只处理网页中显式启用的规则，不执行交易。默认检查间隔和最大数据年龄均为 30 秒；Web 用 `HL_APP_RISK_MONITOR_STALE_SECONDS=60` 判断监控是否过期。只启动 `web gateway` 的部署命令不会启动 worker，需要风险监控时应使用全服务命令或把 `worker` 加入启动列表。
 
 `deploy/hl-app-web.service.example`、`hl-app-worker.service.example` 和 `nginx.conf.example` 仅为模板，不启用。代理只暴露一个同源站点：`/api/v1` 到后端，其余 SPA fallback 到 dist。
 

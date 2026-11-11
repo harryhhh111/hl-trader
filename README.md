@@ -14,7 +14,7 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 - 独立运行与切换手册：[INDEPENDENT_APP.md](docs/deployment/INDEPENDENT_APP.md)。
 - stock_data 资讯增量同步接口开发合同：[STOCK_DATA_NEWS_SYNC_CONTRACT.md](docs/STOCK_DATA_NEWS_SYNC_CONTRACT.md)。
 - 调仓盘口轮询与成交滑点实施合同：[HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md](docs/HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md)。
-- Pair 止盈止损与风险自动化后续规划：[HYPERLIQUID_PAIR_RISK_AUTOMATION.md](docs/HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
+- Pair 止盈止损监控、人工平仓与后续自动化边界：[HYPERLIQUID_PAIR_RISK_AUTOMATION.md](docs/HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
 - 阈值再平衡第一版后续规划：[HYPERLIQUID_THRESHOLD_REBALANCING.md](docs/HYPERLIQUID_THRESHOLD_REBALANCING.md)。
 
 ## 独立 Web 应用（迁移实施中）
@@ -53,7 +53,7 @@ Web 固定单进程，启动时持有 PostgreSQL 生命周期锁，不自动建�
 
 ### Docker Compose 本机空库部署
 
-`compose.yaml` 提供单进程 Web 和 Nginx，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`，采集 worker 不启动。默认示例使用 HTTP 和 `Secure cookie=false`，后端因此只接受 localhost 本机 Origin；LAN 或公网访问需另行配置 HTTPS、`Secure cookie=true` 和实际可信 Origin。
+`compose.yaml` 提供单进程 Web、Nginx 和独立 worker，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`。worker 默认只运行 Pair 风险只读监控，股票采集和 AI 增强默认关闭；没有启用规则的账户不会被监控。默认示例使用 HTTP 和 `Secure cookie=false`，后端因此只接受 localhost 本机 Origin；LAN 或公网访问需另行配置 HTTPS、`Secure cookie=true` 和实际可信 Origin。
 
 ```sh
 mkdir -p .runtime
@@ -217,6 +217,12 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 独立 Web 的 pair 详情页可添加多个“名称 + 公开地址”并切换当前账户。账户存于
 `hyperliquid_pair_accounts`，每个 pair 至多一个当前地址，缓存按地址隔离；JSON 中已有的
 `account_address` 在首次添加时保留为“默认账户”。公开账户地址与托管 API Wallet 分表保存；托管私钥仅以密文入库。
+
+### Pair 止盈止损监控与人工平仓
+
+pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损 USD 金额。独立 worker 默认每 30 秒读取最新两腿持仓，以未实现盈亏之和判断阈值；数据缺失、过期或身份不一致时不触发。达到条件后页面显示提醒和“预览并人工平仓”，复用目标为 `0` 的调仓弹窗，由用户重新核对并签名，监控 worker 不持有私钥、不发送订单。规则、触发和人工执行结果持久化，重复检查不会重复生成提醒；worker 停止或状态过期时页面明确提示。
+
+该口径不包含历史已实现盈亏、资金费和手续费。全自动止盈止损尚未实现；IOC 部分成交、断线和裸露仓位风险仍按现有调仓回执处理。
 
 ### 两腿目标仓位调整
 

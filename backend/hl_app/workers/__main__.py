@@ -13,7 +13,7 @@ def main() -> int:
     group.add_argument("--dry-run", action="store_true")
     group.add_argument("--once", action="store_true")
     group.add_argument("--run", action="store_true")
-    parser.add_argument("--kind", choices=["quotes", "announcements"])
+    parser.add_argument("--kind", choices=["quotes", "announcements", "pair_risk"])
     args = parser.parse_args()
     url = database_url("runtime")
     if args.dry_run:

@@ -240,6 +240,46 @@ export interface HlV2Announcements {
   block: HlAnnouncementsBlock;
 }
 
+export type HlRiskStatus = 'disabled' | 'monitoring' | 'triggered' | 'executing' | 'completed' | 'incomplete' | 'unknown' | 'unavailable';
+export type HlRiskTrigger = 'take_profit' | 'stop_loss';
+
+export interface HlPairRiskEvent {
+  id: number;
+  event_type: 'rule_updated' | 'triggered' | 'trigger_cleared' | 'completed' | 'execution_updated';
+  trigger_kind: HlRiskTrigger | null;
+  pair_unrealized_pnl: string | null;
+  action_id: string | null;
+  request_id: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface HlPairRisk {
+  configured: boolean;
+  pair_id: string;
+  account_address: string;
+  network?: 'mainnet' | 'testnet';
+  pair_config_revision?: string;
+  enabled: boolean;
+  take_profit_usd: string | null;
+  stop_loss_usd: string | null;
+  rule_revision: number;
+  status: HlRiskStatus;
+  worker_available: boolean;
+  last_attempt_at: string | null;
+  last_checked_at: string | null;
+  pair_unrealized_pnl: string | null;
+  position_state: HlPositionState | null;
+  trigger_kind: HlRiskTrigger | null;
+  triggered_at: string | null;
+  trigger_pnl: string | null;
+  last_action_id: string | null;
+  last_request_id: string | null;
+  last_error: string | null;
+  updated_at?: string;
+  events: HlPairRiskEvent[];
+}
+
 export type HlAdjustmentStatus = 'preview' | 'prepared' | 'succeeded' | 'incomplete' | 'unknown';
 export type HlAdjustmentLegStatus = 'not_required' | 'prepared' | 'pending' | 'filled' | 'partially_filled' | 'rejected' | 'unknown';
 

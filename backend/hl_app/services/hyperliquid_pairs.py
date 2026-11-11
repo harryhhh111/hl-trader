@@ -648,6 +648,17 @@ def get_pair_dashboard(pair_id: str, database_url: str | None = None, owner_acco
             return snapshot
 
 
+def get_pair_dashboard_for_account(pair_id: str, account_address: str) -> dict:
+    revision, pairs = load_pairs()
+    descriptor = next((item for item in pairs if item["id"] == pair_id), None)
+    if descriptor is None:
+        raise LookupError(f"未知或停用的 pair: {pair_id}")
+    descriptor = {**descriptor, "account_address": account_address.lower()}
+    with _collector_sem:
+        snapshot = _run_dashboard(["--pair", pair_id, "--address", descriptor["account_address"]])
+        return _validate_v2_snapshot(snapshot, descriptor, revision)
+
+
 def get_announcements() -> dict:
     revision, _pairs = load_pairs()
     key = _cache_key("announcements", revision, None)

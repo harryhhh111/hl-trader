@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { EChartsWrapper } from '@/components/charts/echarts-wrapper';
 import { AccountSettings } from '@/components/hyperliquid/account-settings';
 import { PositionAdjustment } from '@/components/hyperliquid/position-adjustment';
+import { PairRiskControls } from '@/components/hyperliquid/pair-risk-controls';
 import { TradeHistory } from '@/components/hyperliquid/trade-history';
 import { PageHeader } from '@/components/layout/page-header';
 import {
@@ -124,9 +125,11 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
             </span>
             <span>挂单数 <span className="font-mono">{positions.open_orders ?? '—'}</span></span>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">只读观察，未接入执行状态；盈亏仅为该地址指定两腿的未实现盈亏，不是独立策略收益。</p>
+          <p className="mt-2 text-xs text-muted-foreground">盈亏仅为该地址指定两腿的当前未实现盈亏，不是独立策略累计收益。</p>
         </CardContent>
       </Card>
+
+      <PairRiskControls descriptor={descriptor} configRevision={configRevision} />
 
       <BlockFrame title={`${first} / ${second} 比价`} block={ratio} hint="UTC 已收盘日线；缺失日期断线；30/90 天切换。">
         <RatioChart points={ratio.points} coins={descriptor.coins} />

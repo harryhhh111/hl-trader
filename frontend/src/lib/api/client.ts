@@ -75,6 +75,19 @@ export const hyperliquidPairsApi = {
   tradeHistory: (pairId: string, accountAddress: string) => apiFetch<import("@/lib/types/hyperliquid").HlTradeHistory>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/trade-history?account_address=${encodeURIComponent(accountAddress)}`,
   ),
+  pairRisk: (pairId: string, accountAddress: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairRisk>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/risk?account_address=${encodeURIComponent(accountAddress)}`,
+  ),
+  savePairRisk: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    enabled: boolean;
+    take_profit_usd: string | null;
+    stop_loss_usd: string | null;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlPairRisk>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/risk`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
   accounts: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccounts>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts`,
   ),

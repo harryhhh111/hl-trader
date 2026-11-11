@@ -67,6 +67,7 @@ services:
       HL_APP_COLLECTORS_ENABLED: "false"
       HL_APP_SCHEDULER_ENABLED: "false"
       HL_APP_ENHANCEMENT_ENABLED: "false"
+      HL_APP_RISK_MONITOR_STALE_SECONDS: ${HL_APP_RISK_MONITOR_STALE_SECONDS:-60}
     volumes:
       - ./hl-dashboard-pairs.example.json:/etc/hl-app/pairs.json:ro
       - hl-adjustment-state:/var/lib/hl-trader
@@ -75,6 +76,32 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    depends_on:
+      db-grants:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *web-image
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *app-schema
+      HL_APP_DATABASE_URL: postgresql://hl_app_runtime:${HL_APP_RUNTIME_PASSWORD}@host.docker.internal:5432/${HL_APP_DATABASE_NAME}
+      HL_APP_TRADER_BIN: /usr/local/bin/hl-trader
+      HL_APP_PAIRS_CONFIG: /etc/hl-app/pairs.json
+      HL_APP_COLLECTORS_ENABLED: ${HL_APP_COLLECTORS_ENABLED:-false}
+      HL_APP_SCHEDULER_ENABLED: "true"
+      HL_APP_ENHANCEMENT_ENABLED: ${HL_APP_ENHANCEMENT_ENABLED:-false}
+      HL_APP_COLLECTION_INTERVAL_SECONDS: ${HL_APP_COLLECTION_INTERVAL_SECONDS:-3600}
+      HL_APP_SEC_USER_AGENT: ${HL_APP_SEC_USER_AGENT:-}
+      HL_APP_RISK_MONITOR_ENABLED: ${HL_APP_RISK_MONITOR_ENABLED:-true}
+      HL_APP_RISK_MONITOR_INTERVAL_SECONDS: ${HL_APP_RISK_MONITOR_INTERVAL_SECONDS:-30}
+      HL_APP_RISK_MAX_DATA_AGE_SECONDS: ${HL_APP_RISK_MAX_DATA_AGE_SECONDS:-30}
+    volumes:
+      - ./hl-dashboard-pairs.example.json:/etc/hl-app/pairs.json:ro
     depends_on:
       db-grants:
         condition: service_completed_successfully

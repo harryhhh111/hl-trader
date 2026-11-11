@@ -71,6 +71,9 @@ export async function refreshHyperliquid(
   await qc.invalidateQueries({
     queryKey: pairId == null ? ['hl-trade-history'] : ['hl-trade-history', pairId],
   });
+  await qc.invalidateQueries({
+    queryKey: pairId == null ? ['hl-pair-risk'] : ['hl-pair-risk', pairId],
+  });
   if (pairId == null) {
     await qc.invalidateQueries({ queryKey: ['hl-announcements'] });
   }

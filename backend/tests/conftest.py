@@ -42,11 +42,12 @@ class PostgresNamespace:
                             sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)
                         )
                     )
-                cursor.execute(
-                    sql.SQL("REVOKE UPDATE, DELETE ON {}.hyperliquid_api_wallet_events FROM {}").format(
-                        sql.Identifier(self.schema), sql.Identifier(self.role)
+                for table in ("hyperliquid_api_wallet_events", "hyperliquid_pair_risk_events"):
+                    cursor.execute(
+                        sql.SQL("REVOKE UPDATE, DELETE ON {}.{} FROM {}").format(
+                            sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)
+                        )
                     )
-                )
 
 
 def _schema_url(url: str, schema: str) -> str:

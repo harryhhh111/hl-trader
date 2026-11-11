@@ -57,6 +57,51 @@ test("账户添加与调仓表单按需弹窗展示", async ({ page }) => {
   await expect(adjustmentDialog).toHaveCount(0);
 });
 
+test("Pair 风险规则保存后展示触发提醒和人工平仓预览", async ({ page }) => {
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await page.getByLabel("整体止盈金额").fill("300");
+  await page.getByLabel("整体止损金额").fill("500");
+  await page.getByLabel("启用止盈止损监控").check();
+  await page.getByRole("button", { name: "保存规则", exact: true }).click();
+  await expect(page.getByText("规则已保存；监控 worker 将从新规则重新检查。")).toBeVisible();
+  await expect(page.getByText("监控 worker 未运行或状态已过期；旧读数不会继续触发，也不能代替最新平仓预览。")).toBeVisible();
+
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/risk?*", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data: {
+      configured: true,
+      pair_id: "nbis-crwv",
+      account_address: "0x0000000000000000000000000000000000000043",
+      enabled: true,
+      take_profit_usd: "300",
+      stop_loss_usd: "500",
+      rule_revision: 1,
+      status: "triggered",
+      worker_available: true,
+      last_attempt_at: "2026-11-11T00:00:00Z",
+      last_checked_at: "2026-11-11T00:00:00Z",
+      pair_unrealized_pnl: "300",
+      position_state: "opposite",
+      trigger_kind: "take_profit",
+      triggered_at: "2026-11-11T00:00:00Z",
+      trigger_pnl: "300",
+      last_action_id: null,
+      last_request_id: null,
+      last_error: null,
+      events: [],
+    } }),
+  }));
+  await page.reload();
+  await expect(page.getByText("已达到 Pair 整体止盈条件", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "预览并人工平仓", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("每腿目标名义")).toHaveValue("0");
+  await expect(dialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
+});
+
 test("pair 页面底部展示调仓交易历史", async ({ page }) => {
   const actionId = `adjust-0x${"ab".repeat(16)}`;
   await page.route("**/api/v1/hyperliquid/pairs/hype-btc/trade-history?*", (route) => route.fulfill({

@@ -183,6 +183,43 @@ test('仓位标题旁展示调仓入口，目标与预览表单默认收进弹�
   qc.clear();
 });
 
+test('Pair 止盈止损展示整体阈值、触发提醒和人工平仓入口', () => {
+  const value = snapshot(nbisFixture);
+  const qc = seed(value);
+  const account = value.pair.account_address;
+  if (account == null) throw new Error('fixture 应有账户');
+  qc.setQueryData(['hl-pair-risk', value.pair.id, account], {
+    configured: true,
+    pair_id: value.pair.id,
+    account_address: account,
+    enabled: true,
+    take_profit_usd: '300',
+    stop_loss_usd: '500',
+    rule_revision: 1,
+    status: 'triggered',
+    worker_available: true,
+    last_attempt_at: '2026-11-11T00:00:00Z',
+    last_checked_at: '2026-11-11T00:00:00Z',
+    pair_unrealized_pnl: '300',
+    position_state: 'opposite',
+    trigger_kind: 'take_profit',
+    triggered_at: '2026-11-11T00:00:00Z',
+    trigger_pnl: '300',
+    last_action_id: null,
+    last_request_id: null,
+    last_error: null,
+    events: [],
+  });
+  const html = renderDetail(qc, value.pair.id);
+  assert.match(html, /Pair 止盈止损/);
+  assert.match(html, /已达到 Pair 整体止盈条件/);
+  assert.match(html, /预览并人工平仓/);
+  assert.match(html, /只提醒，不会自动下单/);
+  assert.match(html, /aria-label="整体止盈金额"/);
+  assert.match(html, /aria-label="整体止损金额"/);
+  qc.clear();
+});
+
 test('交易历史位于详情页底部并展示两腿成交与订单 ID', () => {
   const value = snapshot(hypeFixture);
   const qc = seed(value);

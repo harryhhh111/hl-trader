@@ -24,13 +24,15 @@ const actionLabel = (action: string, reduceOnly: boolean) => {
   return `${action === 'buy' ? '买入' : '卖出'}${reduceOnly ? '（只减仓）' : '（增仓）'}`;
 };
 
-export function PositionAdjustment({ descriptor, configRevision }: {
+export function PositionAdjustment({ descriptor, configRevision, initialTarget = '2000', buttonLabel = '调整仓位' }: {
   descriptor: HlPairDescriptor;
   configRevision: string;
+  initialTarget?: string;
+  buttonLabel?: string;
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [target, setTarget] = useState('2000');
+  const [target, setTarget] = useState(initialTarget);
   const [signerMode, setSignerMode] = useState<'managed' | 'local' | 'injected'>('local');
   const [injectedSigner, setInjectedSigner] = useState<string | null>(null);
   const [localWallet, setLocalWallet] = useState<LocalWallet | null>(null);
@@ -148,6 +150,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
 
   useEffect(() => {
     setOpen(false);
+    setTarget(initialTarget);
     setReport(null);
     setInjectedSigner(null);
     setLocalWallet(null);
@@ -158,7 +161,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
     preview.reset();
     browser.reset();
     managed.reset();
-  }, [descriptor.id, account, configRevision]);
+  }, [descriptor.id, account, configRevision, initialTarget]);
 
   const activeRequest = managedWallet.data?.active_execution;
   useEffect(() => {
@@ -249,7 +252,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
   return (
     <>
       <Button type="button" size="sm" variant="outline" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
-        <SlidersHorizontal className="mr-2 h-4 w-4" />调整仓位
+        <SlidersHorizontal className="mr-2 h-4 w-4" />{buttonLabel}
       </Button>
       <Dialog
         open={open}

@@ -12,6 +12,7 @@ from ..services import hyperliquid_adjustments as adjustments_service
 from ..services import hyperliquid_history as history_service
 from ..services import hyperliquid_pairs as pairs_service
 from ..services import hyperliquid_quotes as quotes_service
+from ..services import hyperliquid_risk as risk_service
 from ..services import hyperliquid_managed_adjustments as managed_adjustments_service
 from ..services import hyperliquid_wallets as wallets_service
 from ..services import hyperliquid_wallet_authorization as wallet_authorization
@@ -81,6 +82,16 @@ class ManagedWalletDelete(WalletChallengeCreate):
     challenge_id: str = Field(min_length=20, max_length=128)
     wallet_address: str = Field(min_length=42, max_length=42)
     wallet_version: int = Field(ge=1)
+
+
+class RiskRuleSave(BaseModel):
+    account_address: str = Field(min_length=42, max_length=42)
+    config_revision: str = Field(min_length=64, max_length=64)
+    enabled: bool
+    take_profit_usd: str | None = Field(default=None, max_length=40)
+    stop_loss_usd: str | None = Field(default=None, max_length=40)
+
+    model_config = {"extra": "forbid"}
 
 
 class ManagedAdjustmentPreview(AdjustmentPreview):
@@ -225,6 +236,46 @@ def delete_managed_wallet(pair_id: str, body: ManagedWalletDelete, request: Requ
         raise _wallet_error(exc) from exc
 
 
+def _risk_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, (risk_service.RiskError, adjustments_service.AdjustmentError, accounts_service.PairAccountError)):
+        return HTTPException(exc.status_code, exc.detail)
+    if isinstance(exc, pairs_service.PairsConfigError):
+        return _config_error(exc)
+    logger.exception("hyperliquid pair risk operation failed")
+    return HTTPException(503, "Pair 止盈止损暂不可用")
+
+
+def _record_risk_result(request: Request, pair_id: str, account_address: str, report: dict) -> None:
+    try:
+        risk_service.record_close_result(
+            request.app.state.settings.database_url, pair_id, account_address, _owner(request), report,
+        )
+    except Exception:
+        logger.exception("pair risk close result could not be recorded")
+
+
+@router.get("/hyperliquid/pairs/{pair_id}/risk")
+def get_pair_risk(pair_id: str, account_address: str, request: Request) -> dict:
+    try:
+        return {"data": risk_service.get_rule(
+            request.app.state.settings.database_url, pair_id, account_address, _owner(request),
+        )}
+    except Exception as exc:
+        raise _risk_error(exc) from exc
+
+
+@router.put("/hyperliquid/pairs/{pair_id}/risk")
+def save_pair_risk(pair_id: str, body: RiskRuleSave, request: Request) -> dict:
+    try:
+        return {"data": risk_service.save_rule(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.enabled, body.take_profit_usd, body.stop_loss_usd,
+            _owner(request),
+        )}
+    except Exception as exc:
+        raise _risk_error(exc) from exc
+
+
 @router.get("/hyperliquid/pairs/{pair_id}/adjustment-quote")
 def adjustment_quote(pair_id: str, config_revision: str) -> dict:
     try:
@@ -281,6 +332,7 @@ def execute_managed_adjustment(pair_id: str, body: ManagedAdjustmentExecute, req
             body.config_revision, body.target_notional, body.confirmation,
             body.request_id, body.wallet_version, request.state.session,
         )
+        _record_risk_result(request, pair_id, body.account_address, result)
         return JSONResponse({"data": result}, status_code=status)
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -291,9 +343,11 @@ def execute_managed_adjustment(pair_id: str, body: ManagedAdjustmentExecute, req
 @router.get("/hyperliquid/pairs/{pair_id}/adjustments/managed-executions/{request_id}")
 def get_managed_adjustment(pair_id: str, request_id: str, request: Request) -> dict:
     try:
-        return {"data": managed_adjustments_service.get_managed_execution(
+        result = managed_adjustments_service.get_managed_execution(
             request.app.state.settings.database_url, pair_id, request_id, _owner(request)
-        )}
+        )
+        _record_risk_result(request, pair_id, result["account_address"], result)
+        return {"data": result}
     except Exception as exc:
         raise _wallet_error(exc) from exc
 
@@ -334,6 +388,7 @@ def submit_browser_adjustment(pair_id: str, body: BrowserAdjustmentSubmit, reque
             [item.model_dump() for item in body.signatures],
             _owner(request),
         )
+        _record_risk_result(request, pair_id, body.account_address, report)
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -356,6 +411,7 @@ def execute_pair_adjustment(pair_id: str, body: AdjustmentExecute, request: Requ
             body.confirmation,
             _owner(request),
         )
+        _record_risk_result(request, pair_id, body.account_address, report)
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc

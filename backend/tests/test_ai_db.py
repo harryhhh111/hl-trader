@@ -111,7 +111,7 @@ def test_worker_lifecycle_is_exclusive_and_dry_run_has_no_network(seeded) -> Non
     try:
         with pytest.raises(WorkerAlreadyRunning):
             second.acquire()
-        assert dry_run(seeded.runtime_url)["tasks"] == ["quotes", "announcements", "news_enhancement"]
+        assert dry_run(seeded.runtime_url)["tasks"] == ["quotes", "announcements", "news_enhancement", "pair_risk"]
     finally:
         first.close()
         second.close()

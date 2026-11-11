@@ -11,6 +11,7 @@ from ..collectors.quotes import collect_security, enabled_securities
 from ..collectors.sources import collect_source, ensure_sec_sources, registered_sources
 from ..collectors.sec_client import SECClient
 from ..services import ai
+from ..services import hyperliquid_risk
 
 WORKER_LIFECYCLE_LOCK_KEY = 0x484C5F574F524B31
 
@@ -74,8 +75,9 @@ def dry_run(url: str) -> dict:
     return {
         "collectors_enabled": os.environ.get("HL_APP_COLLECTORS_ENABLED", "false") == "true",
         "scheduler_enabled": os.environ.get("HL_APP_SCHEDULER_ENABLED", "false") == "true",
+        "risk_monitor_enabled": os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false") == "true",
         "enhancement_enabled": _enhancement_enabled(),
-        "tasks": ["quotes", "announcements", "news_enhancement"],
+        "tasks": ["quotes", "announcements", "news_enhancement", "pair_risk"],
         "quote_targets": [row["stock_code"] for row in enabled_securities(url)],
         "sources": [
             {"source_id": row["source_id"], "kind": row["source_kind"], "issuer": row["issuer_identifier"]}
@@ -85,7 +87,9 @@ def dry_run(url: str) -> dict:
 
 
 def run_once(url: str, kind: str, http_get=None) -> dict:
-    if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
+    collectors_enabled = os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() == "true"
+    risk_enabled = os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false").lower() == "true"
+    if (kind == "pair_risk" and not risk_enabled) or (kind != "pair_risk" and not collectors_enabled):
         return {"status": "disabled", "kind": kind}
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
@@ -96,6 +100,12 @@ def run_once(url: str, kind: str, http_get=None) -> dict:
 
 
 def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) -> dict:
+    if kind == "pair_risk":
+        if os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false").lower() != "true":
+            return {"status": "disabled", "kind": kind}
+        lifecycle.ensure_healthy()
+        assert_active(url)
+        return hyperliquid_risk.monitor_once(url)
     if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
         return {"status": "disabled", "kind": kind}
     lifecycle.ensure_healthy()
@@ -107,7 +117,7 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
             results.append({security["stock_code"]: collect_security(url, security)})
         return {"kind": kind, "results": results}
     if kind != "announcements":
-        raise ValueError("kind 只支持 quotes 或 announcements")
+        raise ValueError("kind 只支持 quotes、announcements 或 pair_risk")
     enhancer = enhance_record if _enhancement_enabled() else None
     ensure_sec_sources(url)
     sources = registered_sources(url)
@@ -125,21 +135,27 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
 def run_scheduler(url: str) -> None:
     if os.environ.get("HL_APP_SCHEDULER_ENABLED", "false").lower() != "true":
         raise RuntimeError("HL_APP_SCHEDULER_ENABLED 未启用")
-    interval = int(os.environ.get("HL_APP_COLLECTION_INTERVAL_SECONDS", "3600"))
+    interval = max(60, int(os.environ.get("HL_APP_COLLECTION_INTERVAL_SECONDS", "3600")))
+    risk_interval = max(5, int(os.environ.get("HL_APP_RISK_MONITOR_INTERVAL_SECONDS", "30")))
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
+    next_collection = 0.0
+    next_risk = 0.0
     try:
         while True:
             lifecycle.ensure_healthy()
+            now = time.monotonic()
             try:
-                _run_once(url, "quotes", lifecycle)
-                _run_once(url, "announcements", lifecycle)
+                if now >= next_collection:
+                    _run_once(url, "quotes", lifecycle)
+                    _run_once(url, "announcements", lifecycle)
+                    next_collection = now + interval
+                if now >= next_risk:
+                    _run_once(url, "pair_risk", lifecycle)
+                    next_risk = now + risk_interval
             except MaintenanceMode:
-                # Stay idle with the lifecycle lock held until an explicit activation.
-                pass
-            deadline = time.monotonic() + max(60, interval)
-            while (remaining := deadline - time.monotonic()) > 0:
-                lifecycle.ensure_healthy()
-                time.sleep(min(5, remaining))
+                next_collection = now + interval
+                next_risk = now + risk_interval
+            time.sleep(min(5, risk_interval))
     finally:
         lifecycle.close()
