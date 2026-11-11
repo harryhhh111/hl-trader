@@ -14,6 +14,8 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 - 独立运行与切换手册：[INDEPENDENT_APP.md](docs/deployment/INDEPENDENT_APP.md)。
 - stock_data 资讯增量同步接口开发合同：[STOCK_DATA_NEWS_SYNC_CONTRACT.md](docs/STOCK_DATA_NEWS_SYNC_CONTRACT.md)。
 - 调仓盘口轮询与成交滑点实施合同：[HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md](docs/HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md)。
+- Pair 止盈止损与风险自动化后续规划：[HYPERLIQUID_PAIR_RISK_AUTOMATION.md](docs/HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
+- 阈值再平衡第一版后续规划：[HYPERLIQUID_THRESHOLD_REBALANCING.md](docs/HYPERLIQUID_THRESHOLD_REBALANCING.md)。
 
 ## 独立 Web 应用（迁移实施中）
 
