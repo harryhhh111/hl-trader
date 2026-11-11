@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { plainDiagnostic, positionLegsLabel } from './format.ts';
+import { plainDiagnostic, positionLegsLabel, slippageLabel } from './format.ts';
 import type { HlV2Position } from '../../lib/types/hyperliquid';
 
 test('统一账户权益口径 → 白话', () => {
@@ -72,4 +72,11 @@ test('方向摘要直接展示两腿实际多空', () => {
   );
   assert.equal(positionLegsLabel(['HYPE', 'BTC'], [], 'flat'), '空仓');
   assert.equal(positionLegsLabel(['HYPE', 'BTC'], null, 'unknown'), '未知');
+});
+
+
+test('滑点显示正负方向、金额和缺省值', () => {
+  assert.equal(slippageLabel('0.25', '1.25'), '+0.2500% · +1.25 USD（不利）');
+  assert.equal(slippageLabel('-0.1', '-0.5'), '-0.1000% · -0.50 USD（有利）');
+  assert.equal(slippageLabel(null, null), '—');
 });

@@ -79,6 +79,10 @@ pub struct AdjustmentLeg {
     pub status: AdjustmentLegStatus,
     pub confirmed_qty: Decimal,
     pub avg_px: Option<Decimal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slippage_pct: Option<Decimal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slippage_usd: Option<Decimal>,
     pub oid: Option<u64>,
     pub result: Option<String>,
     pub final_size: Option<Decimal>,
@@ -230,6 +234,72 @@ fn mid(book: &BboView, coin: &str) -> Result<Decimal, AdjustError> {
         }
         _ => Err(AdjustError::Refused(format!("{coin} 盘口不完整或价格非法"))),
     }
+}
+
+fn fill_slippage(mid_px: Decimal, avg_px: Decimal, qty: Decimal, buy: bool) -> (Decimal, Decimal) {
+    let signed = if buy {
+        avg_px - mid_px
+    } else {
+        mid_px - avg_px
+    };
+    (signed / mid_px * Decimal::from(100), signed * qty)
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdjustmentQuoteLeg {
+    pub coin: String,
+    pub bid: Decimal,
+    pub ask: Decimal,
+    pub mid: Decimal,
+    pub book_time: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdjustmentQuote {
+    pub schema_version: u8,
+    pub pair_id: String,
+    pub network: String,
+    pub config_revision: String,
+    pub queried_at: String,
+    pub legs: Vec<AdjustmentQuoteLeg>,
+}
+
+pub async fn collect_adjustment_quote(
+    adapter: &Adapter,
+    pair: &DashboardPair,
+    config_path: &Path,
+    config_revision: &str,
+) -> Result<AdjustmentQuote, AdjustError> {
+    let mut legs = Vec::with_capacity(2);
+    for coin in &pair.descriptor.coins {
+        let book = adapter.bbo(coin).await?;
+        let mid = mid(&book, coin)?;
+        let book_time = chrono::DateTime::from_timestamp_millis(book.time_ms as i64)
+            .ok_or_else(|| AdjustError::Refused(format!("{coin} 盘口时间非法")))?
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        legs.push(AdjustmentQuoteLeg {
+            coin: coin.clone(),
+            bid: book.bid.expect("mid checked bid"),
+            ask: book.ask.expect("mid checked ask"),
+            mid,
+            book_time,
+        });
+    }
+    let current =
+        config::revision_at(config_path).map_err(|error| AdjustError::State(error.to_string()))?;
+    if current != config_revision {
+        return Err(AdjustError::Refused(
+            "pair 配置已变化，请重新读取盘口".into(),
+        ));
+    }
+    Ok(AdjustmentQuote {
+        schema_version: 1,
+        pair_id: pair.descriptor.id.clone(),
+        network: pair.descriptor.network.label().into(),
+        config_revision: config_revision.into(),
+        queried_at: now_utc(),
+        legs,
+    })
 }
 
 fn check_prior(store: &AdjustStore, request: &AdjustRequest<'_>) -> Result<(), AdjustError> {
@@ -392,6 +462,8 @@ async fn build_plan(
             },
             confirmed_qty: Decimal::ZERO,
             avg_px: None,
+            slippage_pct: None,
+            slippage_usd: None,
             oid: None,
             result: None,
             final_size: None,
@@ -566,6 +638,8 @@ pub async fn run_adjust(
                     leg.status = AdjustmentLegStatus::Filled;
                     leg.confirmed_qty = qty;
                     leg.avg_px = Some(avg_px);
+                    let (pct, usd) = fill_slippage(leg.mid_px, avg_px, qty, leg.action == "buy");
+                    (leg.slippage_pct, leg.slippage_usd) = (Some(pct), Some(usd));
                     leg.oid = Some(oid);
                     leg.result = Some("全部成交".into());
                     false
@@ -574,6 +648,8 @@ pub async fn run_adjust(
                     leg.status = AdjustmentLegStatus::PartiallyFilled;
                     leg.confirmed_qty = qty;
                     leg.avg_px = Some(avg_px);
+                    let (pct, usd) = fill_slippage(leg.mid_px, avg_px, qty, leg.action == "buy");
+                    (leg.slippage_pct, leg.slippage_usd) = (Some(pct), Some(usd));
                     leg.oid = Some(oid);
                     leg.result = Some("部分成交，剩余 IOC 数量已终结".into());
                     true
@@ -1006,6 +1082,8 @@ pub async fn submit_browser_adjustment(
                     leg.status = AdjustmentLegStatus::Filled;
                     leg.confirmed_qty = qty;
                     leg.avg_px = Some(avg_px);
+                    let (pct, usd) = fill_slippage(leg.mid_px, avg_px, qty, leg.action == "buy");
+                    (leg.slippage_pct, leg.slippage_usd) = (Some(pct), Some(usd));
                     leg.oid = Some(oid);
                     leg.result = Some("全部成交".into());
                     false
@@ -1014,6 +1092,8 @@ pub async fn submit_browser_adjustment(
                     leg.status = AdjustmentLegStatus::PartiallyFilled;
                     leg.confirmed_qty = qty;
                     leg.avg_px = Some(avg_px);
+                    let (pct, usd) = fill_slippage(leg.mid_px, avg_px, qty, leg.action == "buy");
+                    (leg.slippage_pct, leg.slippage_usd) = (Some(pct), Some(usd));
                     leg.oid = Some(oid);
                     leg.result = Some("部分成交，剩余 IOC 数量已终结".into());
                     true
@@ -1262,6 +1342,36 @@ mod tests {
 
     fn rejected() -> &'static str {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"rejected"}]}}}"#
+    }
+
+    #[tokio::test]
+    async fn quote_returns_both_books_without_exchange_requests() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let quote = collect_adjustment_quote(
+            &Adapter::with_base_url(&server.base_url()),
+            &fixture.pair,
+            &fixture.path,
+            &fixture.config.revision,
+        )
+        .await
+        .unwrap();
+        assert_eq!(quote.pair_id, "nbis-crwv");
+        assert_eq!(quote.legs.len(), 2);
+        assert_eq!(quote.legs[0].mid, Decimal::TEN);
+        assert_eq!(quote.legs[1].mid, Decimal::new(50, 0));
+        assert_eq!(quote.legs[0].book_time, "2025-10-09T08:53:20.000Z");
+    }
+
+    #[test]
+    fn slippage_is_signed_by_execution_direction() {
+        let (buy_pct, buy_usd) =
+            fill_slippage(Decimal::TEN, Decimal::new(102, 1), Decimal::TWO, true);
+        assert_eq!(buy_pct, Decimal::TWO);
+        assert_eq!(buy_usd, Decimal::new(4, 1));
+        let (sell_pct, sell_usd) =
+            fill_slippage(Decimal::TEN, Decimal::new(102, 1), Decimal::TWO, false);
+        assert_eq!(sell_pct, Decimal::new(-2, 0));
+        assert_eq!(sell_usd, Decimal::new(-4, 1));
     }
 
     #[tokio::test]

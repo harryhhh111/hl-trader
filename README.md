@@ -13,6 +13,7 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 - 独立应用迁移记录：[来源清单](docs/migration/SOURCE_MAP.md)、[执行进展](docs/migration/PROGRESS.md)、[数据与回退合同](docs/migration/DATA_CONTRACT.md)、[验收证据](docs/migration/ACCEPTANCE.md)。
 - 独立运行与切换手册：[INDEPENDENT_APP.md](docs/deployment/INDEPENDENT_APP.md)。
 - stock_data 资讯增量同步接口开发合同：[STOCK_DATA_NEWS_SYNC_CONTRACT.md](docs/STOCK_DATA_NEWS_SYNC_CONTRACT.md)。
+- 调仓盘口轮询与成交滑点实施合同：[HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md](docs/HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md)。
 
 ## 独立 Web 应用（迁移实施中）
 
@@ -215,7 +216,7 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 
 ### 两腿目标仓位调整
 
-产品操作说明位于 Web 子页面 `/hyperliquid/adjustment-guide`，也可从 pair 详情页的“查看使用说明”进入。
+产品操作说明位于 Web 子页面 `/hyperliquid/adjustment-guide`，也可从 pair 详情页的“查看使用说明”进入。弹窗打开时每 5 秒展示两腿最新 BBO；盘口变化会要求重新预览，不会自动改写已签名订单。成交后按预览中间价显示每腿滑点百分比和金额，交易历史保留相同口径。
 
 pair 详情页可输入每腿目标绝对名义（例如 `2000` USD），先按当前账户的实际仓位和最新盘口计算差额，
 再显示两腿交易方向、数量与 IOC 保护价。默认方向为配置第一腿多、第二腿空；已有反向持仓或目标腿挂单时拒绝。

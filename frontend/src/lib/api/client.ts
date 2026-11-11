@@ -78,6 +78,9 @@ export const hyperliquidPairsApi = {
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts/${accountId}/activate`,
     { method: "PUT" },
   ),
+  adjustmentQuote: (pairId: string, configRevision: string) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentQuote>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustment-quote?config_revision=${encodeURIComponent(configRevision)}`,
+  ),
   previewAdjustment: (pairId: string, body: {
     target_notional: string;
     account_address: string;

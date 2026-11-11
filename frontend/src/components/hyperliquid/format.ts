@@ -14,6 +14,15 @@ export const pctFromFraction = (value: string | null | undefined, dp = 5) =>
 export const pctFromNumber = (value: string | null | undefined, withSign = false) =>
   value == null || value === '' ? '—' : `${withSign ? signed(value) : value}%`;
 
+export function slippageLabel(pct: string | null | undefined, usd: string | null | undefined): string {
+  if (pct == null || pct === '' || usd == null || usd === '') return '—';
+  const percent = Number(pct);
+  const amount = Number(usd);
+  if (!Number.isFinite(percent) || !Number.isFinite(amount)) return '—';
+  const direction = percent > 0 ? '不利' : percent < 0 ? '有利' : '无滑点';
+  return `${percent > 0 ? '+' : ''}${percent.toFixed(4)}% · ${amount > 0 ? '+' : ''}${amount.toFixed(2)} USD（${direction}）`;
+}
+
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false });

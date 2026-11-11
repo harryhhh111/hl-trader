@@ -261,6 +261,8 @@ export interface HlAdjustmentLeg {
   status: HlAdjustmentLegStatus;
   confirmed_qty: string;
   avg_px: string | null;
+  slippage_pct?: string | null;
+  slippage_usd?: string | null;
   oid: number | null;
   result: string | null;
   final_size: string | null;
@@ -297,6 +299,23 @@ export interface HlAdjustmentReport {
   error_code?: string | null;
 }
 
+export interface HlAdjustmentQuoteLeg {
+  coin: string;
+  bid: string;
+  ask: string;
+  mid: string;
+  book_time: string;
+}
+
+export interface HlAdjustmentQuote {
+  schema_version: 1;
+  pair_id: string;
+  network: 'mainnet' | 'testnet';
+  config_revision: string;
+  queried_at: string;
+  legs: HlAdjustmentQuoteLeg[];
+}
+
 export type HlTradeHistoryStatus = 'running' | 'succeeded' | 'incomplete' | 'unknown';
 
 export interface HlTradeHistoryLeg {
@@ -309,6 +328,8 @@ export interface HlTradeHistoryLeg {
   status: HlAdjustmentLegStatus;
   confirmed_qty: string;
   avg_px: string | null;
+  slippage_pct?: string | null;
+  slippage_usd?: string | null;
   oid: number | null;
   cloid: string | null;
   result: string | null;

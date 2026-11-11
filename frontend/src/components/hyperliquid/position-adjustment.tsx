@@ -15,7 +15,7 @@ import {
   walletErrorText,
   type LocalWallet,
 } from '@/lib/wallet';
-import { accountShort } from './format';
+import { accountShort, dash, formatTime, slippageLabel } from './format';
 import { refreshHyperliquid } from './queries';
 
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail || error.message : walletErrorText(error);
@@ -233,6 +233,18 @@ export function PositionAdjustment({ descriptor, configRevision }: {
     !['preview', 'prepared'].includes(report.status)
     || ['failed', 'unknown', 'succeeded', 'incomplete'].includes(report.managed_status ?? '')
   );
+  const quoteQuery = useQuery({
+    queryKey: ['hl-adjustment-quote', descriptor.id, configRevision],
+    queryFn: () => hyperliquidPairsApi.adjustmentQuote(descriptor.id, configRevision),
+    enabled: open && account != null && !busy,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    retry: 1,
+  });
+  const stalePreview = report != null
+    && ['preview', 'prepared'].includes(report.status)
+    && quoteQuery.data != null
+    && report.legs.some((leg, index) => quoteQuery.data.legs[index]?.mid !== leg.mid_px);
 
   return (
     <>
@@ -298,6 +310,24 @@ export function PositionAdjustment({ descriptor, configRevision }: {
           )}
           {preview.isError && <p className="text-sm text-rose-600" role="alert">预览失败：{errorText(preview.error)}</p>}
 
+          <section aria-label="实时盘口" className="rounded-md border p-3 text-sm">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium">实时盘口（每 5 秒更新）</span>
+              {quoteQuery.data && <span className="text-xs text-muted-foreground">查询于 {formatTime(quoteQuery.data.queried_at)}</span>}
+            </div>
+            {quoteQuery.isPending && <p className="text-muted-foreground">正在读取盘口…</p>}
+            {quoteQuery.error && <p role="alert" className="text-amber-600">盘口更新失败：{errorText(quoteQuery.error)}</p>}
+            {quoteQuery.data && <div className="grid gap-2 sm:grid-cols-2">
+              {quoteQuery.data.legs.map((leg) => <div key={leg.coin} className="rounded bg-muted/40 p-2">
+                <div className="font-medium">{leg.coin}</div>
+                <div className="mt-1 grid grid-cols-3 gap-2 font-mono text-xs">
+                  <span>买 {leg.bid}</span><span>卖 {leg.ask}</span><span>中 {leg.mid}</span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">盘口时间 {formatTime(leg.book_time)}</div>
+              </div>)}
+            </div>}
+          </section>
+
           {report && (
             <div className="space-y-3 rounded-md border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -312,10 +342,14 @@ export function PositionAdjustment({ descriptor, configRevision }: {
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{report.action_id ?? report.request_id ?? 'dry-run'}</span>
               </div>
+              {stalePreview && <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-500/10 p-2 text-sm text-amber-700" role="alert">
+                <span>盘口已变化，当前预览已过期，请重新预览后再执行。</span>
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => preview.mutate()}>按最新盘口重新预览</Button>
+              </div>}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
                   <thead><tr className="text-left text-xs text-muted-foreground">
-                    {['合约', '当前名义', '预计目标名义', '动作', '交易数量', '保护价', '结果'].map((heading) => <th key={heading} className="py-1 pr-4">{heading}</th>)}
+                    {['合约', '当前名义', '预计目标名义', '动作', '交易数量', '预览中间价', '保护价', '成交均价', '滑点', '结果'].map((heading) => <th key={heading} className="py-1 pr-4">{heading}</th>)}
                   </tr></thead>
                   <tbody>{report.legs.map((leg) => (
                     <tr key={leg.coin} className="border-t">
@@ -324,7 +358,10 @@ export function PositionAdjustment({ descriptor, configRevision }: {
                       <td className="pr-4 font-mono">{leg.estimated_target_notional}</td>
                       <td className="pr-4">{actionLabel(leg.action, leg.reduce_only)}</td>
                       <td className="pr-4 font-mono">{leg.order_qty}</td>
+                      <td className="pr-4 font-mono">{leg.mid_px}</td>
                       <td className="pr-4 font-mono">{leg.action === 'none' ? '—' : leg.protect_px}</td>
+                      <td className="pr-4 font-mono">{dash(leg.avg_px)}</td>
+                      <td className="pr-4 font-mono text-xs">{slippageLabel(leg.slippage_pct, leg.slippage_usd)}</td>
                       <td className="pr-4 text-xs">{isExecutionResult ? leg.result ?? leg.status : report.status === 'prepared' ? '待签名' : '待确认'}</td>
                     </tr>
                   ))}</tbody>
@@ -346,7 +383,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
                         <input aria-label="确认目标金额" className="w-full rounded-md border bg-background px-3 py-2 font-mono sm:w-52"
                           value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={busy} required />
                       </label>
-                      <Button type="button" variant="destructive" disabled={busy || confirmation.trim() !== target.trim()} onClick={() => managed.mutate()}>
+                      <Button type="button" variant="destructive" disabled={busy || stalePreview || confirmation.trim() !== target.trim()} onClick={() => managed.mutate()}>
                         {managed.isPending || report.managed_status === 'running' ? '正在执行或查询原请求…' : '使用托管钱包下单'}
                       </Button>
                     </div>
@@ -375,7 +412,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
                       <p className="text-sm text-amber-600">{signerMode === 'local'
                         ? '本地模式会逐腿计算签名，不弹出钱包确认；点击签名按钮前请核对订单。全部签名完成前不会提交任何订单。'
                         : '钱包将逐腿显示订单签名，可能弹窗一到两次。全部签名完成前不会提交任何订单。'}</p>
-                      <Button type="button" variant="destructive" disabled={busy} onClick={() => browser.mutate()}>
+                      <Button type="button" variant="destructive" disabled={busy || stalePreview} onClick={() => browser.mutate()}>
                         {browser.isPending ? '正在签名或提交…'
                           : report.status === 'prepared' ? '重新生成并签名'
                           : signerMode === 'local' ? '本地签名并下单' : '调起钱包签名并下单'}

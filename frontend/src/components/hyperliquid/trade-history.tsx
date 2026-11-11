@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiError, hyperliquidPairsApi } from '@/lib/api/client';
 import type { HlTradeHistoryStatus } from '@/lib/types/hyperliquid';
-import { dash, formatTime } from './format';
+import { dash, formatTime, slippageLabel } from './format';
 
 const STATUS_LABEL: Record<HlTradeHistoryStatus, string> = {
   running: '执行中',
@@ -82,7 +82,7 @@ export function TradeHistory({ pairId, accountAddress }: {
             <div className="overflow-x-auto">
               <table className="w-full text-sm whitespace-nowrap">
                 <thead><tr className="text-left text-xs text-muted-foreground">
-                  {['合约', '持仓方向', '操作', '委托数量', '保护价', '成交数量', '成交均价', '腿状态', '订单 ID'].map((heading) => (
+                  {['合约', '持仓方向', '操作', '委托数量', '保护价', '成交数量', '成交均价', '滑点', '腿状态', '订单 ID'].map((heading) => (
                     <th key={heading} className="py-1 pr-4">{heading}</th>
                   ))}
                 </tr></thead>
@@ -95,6 +95,7 @@ export function TradeHistory({ pairId, accountAddress }: {
                     <td className="pr-4 font-mono">{leg.action === 'none' ? '—' : leg.protect_px}</td>
                     <td className="pr-4 font-mono">{leg.action === 'none' ? '—' : leg.confirmed_qty}</td>
                     <td className="pr-4 font-mono">{dash(leg.avg_px)}</td>
+                    <td className="pr-4 font-mono text-xs">{slippageLabel(leg.slippage_pct, leg.slippage_usd)}</td>
                     <td className="pr-4">{LEG_STATUS_LABEL[leg.status] ?? leg.status}</td>
                     <td className="font-mono">{leg.oid ?? '—'}</td>
                   </tr>

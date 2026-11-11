@@ -126,6 +126,13 @@ enum Commands {
         #[arg(long)]
         execute: bool,
     },
+    /// 只读获取多 pair 两腿 BBO，不加载私钥、不读取调仓回执。
+    AdjustQuote {
+        #[arg(long)]
+        pair: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
     /// 把多 pair 两腿调整到每腿目标 USD 名义；默认只预览，--execute 才签名下单。
     Adjust {
         #[arg(long)]
@@ -254,6 +261,7 @@ async fn main() -> ExitCode {
         }
         Commands::Open { notional, execute } => cmd_open(&config_path, notional, execute).await,
         Commands::Close { execute } => cmd_close(&config_path, execute).await,
+        Commands::AdjustQuote { pair, json: _ } => cmd_adjust_quote(&config_path, &pair).await,
         Commands::Adjust {
             pair,
             address,
@@ -975,6 +983,29 @@ fn cmd_api_wallet_address(secret_fd: std::os::fd::RawFd) -> ExitCode {
             EXIT_OK.into()
         }
         Err(error) => usage_err(format!("API Wallet 私钥加载被拒绝: {error}")),
+    }
+}
+
+async fn cmd_adjust_quote(config_path: &std::path::Path, pair_id: &str) -> ExitCode {
+    let config = match dashboard::config::load(config_path) {
+        Ok(config) => config,
+        Err(error) => return usage_err(format!("pair 配置错误: {error}")),
+    };
+    let pair = match config.enabled_pair(pair_id) {
+        Some(pair) => pair,
+        None => return usage_err(format!("未知或停用的 pair: {pair_id}")),
+    };
+    let adapter = Adapter::for_network(pair.descriptor.network);
+    match adjust::collect_adjustment_quote(&adapter, pair, config_path, &config.revision).await {
+        Ok(quote) => match serde_json::to_string(&quote) {
+            Ok(json) => {
+                println!("{json}");
+                EXIT_OK.into()
+            }
+            Err(error) => runtime_err(format!("盘口序列化失败: {error}")),
+        },
+        Err(adjust::AdjustError::Refused(message)) => usage_err(message),
+        Err(error) => runtime_err(error),
     }
 }
 

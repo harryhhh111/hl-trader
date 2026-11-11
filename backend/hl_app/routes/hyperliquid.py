@@ -11,6 +11,7 @@ from ..services import hyperliquid_accounts as accounts_service
 from ..services import hyperliquid_adjustments as adjustments_service
 from ..services import hyperliquid_history as history_service
 from ..services import hyperliquid_pairs as pairs_service
+from ..services import hyperliquid_quotes as quotes_service
 from ..services import hyperliquid_managed_adjustments as managed_adjustments_service
 from ..services import hyperliquid_wallets as wallets_service
 from ..services import hyperliquid_wallet_authorization as wallet_authorization
@@ -218,6 +219,19 @@ def delete_managed_wallet(pair_id: str, body: ManagedWalletDelete, request: Requ
         )}
     except Exception as exc:
         raise _wallet_error(exc) from exc
+
+
+@router.get("/hyperliquid/pairs/{pair_id}/adjustment-quote")
+def adjustment_quote(pair_id: str, config_revision: str) -> dict:
+    try:
+        return {"data": quotes_service.get_adjustment_quote(pair_id, config_revision)}
+    except adjustments_service.AdjustmentError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except pairs_service.PairsConfigError as exc:
+        raise _config_error(exc) from exc
+    except Exception as exc:
+        logger.exception("hyperliquid adjustment quote failed")
+        raise HTTPException(503, "盘口读取暂不可用") from exc
 
 
 @router.post("/hyperliquid/pairs/{pair_id}/adjustments/preview")

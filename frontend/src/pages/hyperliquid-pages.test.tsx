@@ -200,7 +200,7 @@ test('交易历史位于详情页底部并展示两腿成交与订单 ID', () =>
       legs: [{
         coin: 'HYPE', position_side: 'long', action: 'buy', reduce_only: false,
         order_qty: '10', protect_px: '41', status: 'filled', confirmed_qty: '10',
-        avg_px: '40.5', oid: 12345, cloid: null, result: '全部成交',
+        avg_px: '40.5', slippage_pct: '0.25', slippage_usd: '1.25', oid: 12345, cloid: null, result: '全部成交',
       }, {
         coin: 'BTC', position_side: 'short', action: 'sell', reduce_only: false,
         order_qty: '0.02', protect_px: '100000', status: 'filled', confirmed_qty: '0.02',
@@ -217,6 +217,7 @@ test('交易历史位于详情页底部并展示两腿成交与订单 ID', () =>
   assert.match(html, /交易历史/);
   assert.match(html, /每腿目标/);
   assert.match(html, /40\.5/);
+  assert.match(html, /\+0\.2500% · \+1\.25 USD（不利）/);
   assert.match(html, /12345/);
   assert.match(html, new RegExp(actionId));
   assert.ok(html.indexOf('交易历史') > html.indexOf('解锁锚点'));

@@ -135,7 +135,11 @@ test("本地 API Wallet 签名不会上传或持久化私钥", async ({ page }) 
       action: index === 0 ? "buy" : "sell",
       reduce_only: false,
       order_qty: "1",
+      mid_px: "100",
       protect_px: "100",
+      avg_px: status === "succeeded" ? "100.1" : null,
+      slippage_pct: status === "succeeded" ? "0.1" : null,
+      slippage_usd: status === "succeeded" ? "0.1" : null,
       result: status === "succeeded" ? "filled" : null,
       status: status === "succeeded" ? "filled" : null,
     })),
@@ -163,6 +167,7 @@ test("本地 API Wallet 签名不会上传或持久化私钥", async ({ page }) 
   await expect(dialog.getByText("签名账户")).toContainText("0x7e5f");
   await dialog.getByRole("button", { name: "本地签名并下单" }).click();
   await expect(dialog.getByText("调仓已完成", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("+0.1000% · +0.10 USD（不利）", { exact: true }).first()).toBeVisible();
 
   expect(adjustmentRequests).toHaveLength(3);
   expect(adjustmentRequests.every((body) => !body.includes(privateKey))).toBe(true);
@@ -208,4 +213,77 @@ test("退出后受保护页面重新进入登录", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/watchlist");
   await expect(page).toHaveURL(/\/login$/);
+});
+
+
+test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
+  let mid = "123.29";
+  let quoteCalls = 0;
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustment-quote?*", (route) => {
+    quoteCalls += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: {
+        schema_version: 1,
+        pair_id: "nbis-crwv",
+        network: "mainnet",
+        config_revision: "test-revision",
+        queried_at: "2026-11-10T03:34:27Z",
+        legs: [
+          { coin: "xyz:NBIS", bid: "123.28", ask: "123.30", mid, book_time: "2026-11-10T03:34:26Z" },
+          { coin: "xyz:CRWV", bid: "44.64", ask: "44.66", mid: "44.65", book_time: "2026-11-10T03:34:26Z" },
+        ],
+      } }),
+    });
+  });
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/preview", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data: {
+      schema_version: 1,
+      status: "preview",
+      pair_id: "nbis-crwv",
+      network: "mainnet",
+      account_address: "0x0000000000000000000000000000000000000002",
+      target_notional: "2000",
+      config_revision: "test-revision",
+      action_id: null,
+      legs: [
+        { coin: "xyz:NBIS", position_side: "long", current_size: "0", current_notional: "0", mid_px: mid,
+          target_size: "16", estimated_target_notional: "2000", action: "buy", order_qty: "16", protect_px: "123.31",
+          reduce_only: false, asset: 110086, nonce: null, cloid: null, status: "prepared", confirmed_qty: "0",
+          avg_px: null, oid: null, result: null, final_size: null, final_notional: null },
+        { coin: "xyz:CRWV", position_side: "short", current_size: "0", current_notional: "0", mid_px: "44.65",
+          target_size: "45", estimated_target_notional: "2000", action: "sell", order_qty: "45", protect_px: "44.63",
+          reduce_only: false, asset: 110037, nonce: null, cloid: null, status: "prepared", confirmed_qty: "0",
+          avg_px: null, oid: null, result: null, final_size: null, final_notional: null },
+      ],
+      diagnostics: [],
+    } }),
+  }));
+
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await page.getByRole("button", { name: "调整仓位", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
+  await expect(dialog.getByText("实时盘口（每 5 秒更新）")).toBeVisible();
+  await expect(dialog.getByText("中 123.29", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "预览调仓差额" }).click();
+  await dialog.getByLabel("API Wallet 私钥").fill(`0x${"0".repeat(63)}1`);
+  await dialog.getByRole("button", { name: "加载 API Wallet" }).click();
+  const execute = dialog.getByRole("button", { name: "本地签名并下单" });
+  await expect(execute).toBeEnabled();
+
+  mid = "123.31";
+  await expect(dialog.getByText("盘口已变化，当前预览已过期，请重新预览后再执行。", { exact: true })).toBeVisible({ timeout: 9000 });
+  await expect(execute).toBeDisabled();
+  await dialog.getByRole("button", { name: "按最新盘口重新预览" }).click();
+  await expect(execute).toBeEnabled();
+  expect(quoteCalls).toBeGreaterThanOrEqual(2);
+
+  await dialog.getByRole("button", { name: "关闭弹窗" }).click();
+  const callsAfterClose = quoteCalls;
+  await page.waitForTimeout(5500);
+  expect(quoteCalls).toBe(callsAfterClose);
 });
