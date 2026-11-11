@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .account_auth import AccountAuthService
 from .auth import AuthService, CloudflareAccessService
 from .config import Settings
 from .db import WebLifecycle
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
         app.state.auth = CloudflareAccessService(
             settings.cloudflare_team_domain, settings.cloudflare_access_aud
         )
+    elif settings.auth_mode == "account":
+        app.state.auth = AccountAuthService(settings.database_url, settings.session_ttl_seconds)
     else:
         app.state.auth = AuthService(
             settings.database_url, settings.auth_token, settings.session_ttl_seconds

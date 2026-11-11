@@ -43,6 +43,8 @@ cd ..
 
 认证默认 `HL_APP_AUTH_MODE=token`，上述初始化与轮换流程不变。切换为 `cloudflare_access` 时，配置 `HL_APP_CF_TEAM_DOMAIN=https://<team>.cloudflareaccess.com` 和当前 Access Application 的 `HL_APP_CF_ACCESS_AUD`；Web 逐请求验证 `Cf-Access-Jwt-Assertion` 的 RS256 签名、签发方、AUD 和有效期，不能只信任邮箱请求头。此模式不需要应用 token 或执行 token 初始化/轮换。
 
+`HL_APP_AUTH_MODE=account` 启用网页邮箱注册/登录，不需要用户管理命令。密码仅保存 PBKDF2 哈希；首个注册用户接管已有 Hyperliquid 资源，后续用户的账户、托管钱包和执行记录按 `owner_account_id` 隔离。该模式不需要应用 token 初始化/轮换；切换认证模式和执行 009 migration 均须单独授权。
+
 Web 配置 `HL_APP_TRADER_BIN`、`HL_APP_PAIRS_CONFIG`、可信 Origin、Secure cookie。只有 localhost 开发可显式关闭 Secure。生产 HTTPS 下保持 Secure。Docker 默认示例使用 HTTP 和 `Secure cookie=false`，应通过本机 localhost 或 SSH 端口转发访问；不能直接把 LAN 地址加入可信 Origin，LAN/公网入口必须另行配置 HTTPS、`Secure cookie=true` 和实际 Origin。
 
 ### Docker 可选真实调仓
@@ -125,7 +127,7 @@ npm run test:e2e
 npm audit
 ```
 
-E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动 390×844。后端默认占用本机 8001 端口；已有服务占用时，可在 `frontend/` 下运行 `HL_APP_E2E_BACKEND_PORT=18001 npm run test:e2e`，不要停止现有服务。真实来源/模型不属于默认回归。
+E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动 390×844。后端默认占用本机 8001 端口；已有服务占用时，可在 `frontend/` 下运行 `HL_APP_E2E_BACKEND_PORT=18001 npm run test:e2e`，不要停止现有服务。账号注册/登录另运行 `HL_APP_E2E_AUTH_MODE=account npm run test:e2e -- account-auth.spec.mjs`；该用例在默认 token 套件中自动跳过。真实来源/模型不属于默认回归。
 
 ## 5. 预演与停写测量
 

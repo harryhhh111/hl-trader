@@ -30,7 +30,7 @@ VALID = {
 def client(monkeypatch, tmp_path):
     config_file = tmp_path / 'hl-pairs.json'
     monkeypatch.setenv('HL_APP_PAIRS_CONFIG', str(config_file))
-    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors: descriptors)
+    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors, owner=None: descriptors)
     pairs.clear_cache()
     pairs.clear_runtime_cache()
     app = FastAPI()

@@ -620,7 +620,7 @@ def _cached(cache: dict, key: str):
     return None
 
 
-def get_pair_dashboard(pair_id: str, database_url: str | None = None) -> dict:
+def get_pair_dashboard(pair_id: str, database_url: str | None = None, owner_account_id: int | None = None) -> dict:
     revision, pairs = load_pairs()
     descriptor = next((p for p in pairs if p["id"] == pair_id), None)
     if descriptor is None:
@@ -628,7 +628,7 @@ def get_pair_dashboard(pair_id: str, database_url: str | None = None) -> dict:
     if database_url is not None:
         from .hyperliquid_accounts import apply_active_accounts
 
-        descriptor = apply_active_accounts(database_url, [descriptor])[0]
+        descriptor = apply_active_accounts(database_url, [descriptor], owner_account_id)[0]
     key = _cache_key("pair", revision, descriptor)
     lock = _key_lock(key)
     with lock:

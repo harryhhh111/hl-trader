@@ -45,6 +45,7 @@ class SessionInfo:
     auth_epoch: int
     expires_at: datetime
     email: str | None = None
+    account_id: int | None = None
 
 
 def _token_bytes(token: str) -> bytes:
@@ -291,7 +292,7 @@ def require_session(request: Request) -> SessionInfo:
     except AuthError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     if (
-        request.app.state.settings.auth_mode == "token"
+        request.app.state.settings.auth_mode in {"token", "account"}
         and request.method not in {"GET", "HEAD", "OPTIONS"}
     ):
         check_csrf(request, session)

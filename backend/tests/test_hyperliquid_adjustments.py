@@ -27,7 +27,7 @@ def configured(monkeypatch, tmp_path):
     monkeypatch.delenv("HL_APP_TRADING_ENABLED", raising=False)
     monkeypatch.delenv("HL_APP_AGENT_SECRET_FILE", raising=False)
     monkeypatch.delenv("HL_APP_EXECUTION_STATE_DIR", raising=False)
-    monkeypatch.setattr(accounts, "apply_active_accounts", lambda _url, descriptors: descriptors)
+    monkeypatch.setattr(accounts, "apply_active_accounts", lambda _url, descriptors, owner=None: descriptors)
     pairs.clear_cache()
     yield pairs.load_pairs()[0]
     pairs.clear_cache()

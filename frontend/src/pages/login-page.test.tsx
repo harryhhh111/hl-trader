@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LoginPage } from "./login-page";
 
-function render(authenticated: boolean, authMode?: "token" | "cloudflare_access") {
+function render(authenticated: boolean, authMode?: "token" | "cloudflare_access" | "account") {
   const qc = new QueryClient();
   qc.setQueryData(["session"], { authenticated, auth_mode: authMode });
   return renderToString(
@@ -36,4 +36,15 @@ test("Cloudflare Access 模式不显示应用 token 表单", () => {
   assert.match(html, /需要 Cloudflare Access 登录/);
   assert.match(html, /无需输入应用 token/);
   assert.doesNotMatch(html, /type="password"/);
+});
+
+
+test("账号模式提供登录和网页注册，不需要管理命令", () => {
+  const html = render(false, "account");
+  assert.match(html, /登录/);
+  assert.match(html, /注册/);
+  assert.match(html, /aria-label="邮箱"/);
+  assert.match(html, /aria-label="密码"/);
+  assert.match(html, /独立的 Hyperliquid 账户、托管钱包和调仓记录/);
+  assert.doesNotMatch(html, /登录 token/);
 });

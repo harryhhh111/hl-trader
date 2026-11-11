@@ -49,6 +49,7 @@ try {
     HL_APP_DATABASE_URL: seed.database_url,
     HL_APP_MIGRATION_DATABASE_URL: seed.database_url,
     HL_APP_AUTH_TOKEN: seed.token,
+    HL_APP_AUTH_MODE: process.env.HL_APP_E2E_AUTH_MODE ?? "token",
     HL_APP_SECURE_COOKIE: "false",
     HL_APP_TRUSTED_ORIGINS: "http://127.0.0.1:4173",
     HL_APP_HOST: "127.0.0.1",

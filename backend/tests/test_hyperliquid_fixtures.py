@@ -23,7 +23,7 @@ SNAPSHOT_FIXTURES = ['v2_snapshot_hype_btc.json', 'v2_snapshot_nbis_crwv.json']
 
 @pytest.fixture(autouse=True)
 def static_accounts(monkeypatch):
-    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors: descriptors)
+    monkeypatch.setattr(accounts, 'apply_active_accounts', lambda _url, descriptors, owner=None: descriptors)
 
 
 def load_fixture(name):

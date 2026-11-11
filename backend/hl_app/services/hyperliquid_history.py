@@ -37,6 +37,13 @@ def _decimal(value) -> str:
     return value
 
 
+def _signed_decimal(value) -> str | None:
+    if value is None:
+        return None
+    adjustments._decimal(value, "滑点数值")
+    return value
+
+
 def _timestamp(value) -> str:
     if not isinstance(value, str):
         raise ValueError("timestamp must be a string")
@@ -72,6 +79,8 @@ def _leg(value: dict, coins: list[str]) -> dict:
         "status": value["status"],
         "confirmed_qty": _decimal(value.get("confirmed_qty")),
         "avg_px": None if avg_px is None else _decimal(avg_px),
+        "slippage_pct": _signed_decimal(value.get("slippage_pct")),
+        "slippage_usd": _signed_decimal(value.get("slippage_usd")),
         "oid": oid,
         "cloid": value.get("cloid") if isinstance(value.get("cloid"), str) else None,
         "result": result,
@@ -158,9 +167,9 @@ def read_history(
     }
 
 
-def list_history(url: str, descriptor: dict, account_address: str) -> dict:
+def list_history(url: str, descriptor: dict, account_address: str, owner_account_id: int | None = None) -> dict:
     account = accounts_service.normalize_address(account_address)
-    active = accounts_service.apply_active_accounts(url, [descriptor])[0]["account_address"]
+    active = accounts_service.apply_active_accounts(url, [descriptor], owner_account_id)[0]["account_address"]
     if active != account:
         raise accounts_service.PairAccountError(409, "当前账户已变化，请刷新页面")
     return read_history(adjustments._state_dir(), descriptor, account)

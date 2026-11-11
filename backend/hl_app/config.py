@@ -56,8 +56,8 @@ class Settings:
         if not 1 <= port <= 65535:
             raise ConfigError("HL_APP_PORT must be between 1 and 65535")
         auth_mode = source.get("HL_APP_AUTH_MODE", "token").strip().lower()
-        if auth_mode not in {"token", "cloudflare_access"}:
-            raise ConfigError("HL_APP_AUTH_MODE must be token or cloudflare_access")
+        if auth_mode not in {"token", "cloudflare_access", "account"}:
+            raise ConfigError("HL_APP_AUTH_MODE must be token, cloudflare_access or account")
         auth_token = optional_value("HL_APP_AUTH_TOKEN", source)
         if auth_mode == "token" and auth_token is None:
             raise ConfigError("HL_APP_AUTH_TOKEN is required in token mode")

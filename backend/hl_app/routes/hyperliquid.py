@@ -22,6 +22,10 @@ router = APIRouter(dependencies=[Depends(require_session)])
 logger = logging.getLogger(__name__)
 
 
+def _owner(request: Request) -> int | None:
+    return getattr(getattr(request.state, "session", None), "account_id", None)
+
+
 class PairAccountCreate(BaseModel):
     label: str = Field(min_length=1, max_length=80)
     address: str = Field(min_length=42, max_length=42)
@@ -139,7 +143,7 @@ def _wallet_error(exc: Exception) -> HTTPException:
 def hyperliquid_pairs(request: Request) -> dict:
     try:
         revision, pairs = pairs_service.load_pairs()
-        pairs = accounts_service.apply_active_accounts(request.app.state.settings.database_url, pairs)
+        pairs = accounts_service.apply_active_accounts(request.app.state.settings.database_url, pairs, _owner(request))
         return {"data": {"schema_version": 2, "config_revision": revision, "pairs": pairs}}
     except pairs_service.PairsConfigError as exc:
         raise _config_error(exc) from exc
@@ -150,7 +154,7 @@ def hyperliquid_pairs(request: Request) -> dict:
 @router.get("/hyperliquid/pairs/{pair_id}/accounts")
 def pair_accounts(pair_id: str, request: Request) -> dict:
     try:
-        return {"data": accounts_service.list_accounts(request.app.state.settings.database_url, _descriptor(pair_id))}
+        return {"data": accounts_service.list_accounts(request.app.state.settings.database_url, _descriptor(pair_id), _owner(request))}
     except Exception as exc:
         raise _account_error(exc) from exc
 
@@ -159,7 +163,7 @@ def pair_accounts(pair_id: str, request: Request) -> dict:
 def create_pair_account(pair_id: str, body: PairAccountCreate, request: Request) -> dict:
     try:
         account = accounts_service.add_account(
-            request.app.state.settings.database_url, _descriptor(pair_id), body.label, body.address,
+            request.app.state.settings.database_url, _descriptor(pair_id), body.label, body.address, _owner(request),
         )
         return {"data": account}
     except Exception as exc:
@@ -170,7 +174,7 @@ def create_pair_account(pair_id: str, body: PairAccountCreate, request: Request)
 def activate_pair_account(pair_id: str, account_id: int, request: Request) -> dict:
     try:
         account = accounts_service.activate_account(
-            request.app.state.settings.database_url, _descriptor(pair_id), account_id,
+            request.app.state.settings.database_url, _descriptor(pair_id), account_id, _owner(request),
         )
         return {"data": account}
     except Exception as exc:
@@ -181,7 +185,7 @@ def activate_pair_account(pair_id: str, account_id: int, request: Request) -> di
 def get_managed_wallet(pair_id: str, account_address: str, request: Request) -> dict:
     try:
         return {"data": wallets_service.get_wallet(
-            request.app.state.settings.database_url, pair_id, account_address
+            request.app.state.settings.database_url, pair_id, account_address, _owner(request)
         )}
     except Exception as exc:
         raise _wallet_error(exc) from exc
@@ -243,6 +247,7 @@ def preview_pair_adjustment(pair_id: str, body: AdjustmentPreview, request: Requ
             body.account_address,
             body.config_revision,
             body.target_notional,
+            _owner(request),
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -287,7 +292,7 @@ def execute_managed_adjustment(pair_id: str, body: ManagedAdjustmentExecute, req
 def get_managed_adjustment(pair_id: str, request_id: str, request: Request) -> dict:
     try:
         return {"data": managed_adjustments_service.get_managed_execution(
-            request.app.state.settings.database_url, pair_id, request_id
+            request.app.state.settings.database_url, pair_id, request_id, _owner(request)
         )}
     except Exception as exc:
         raise _wallet_error(exc) from exc
@@ -303,6 +308,7 @@ def prepare_browser_adjustment(pair_id: str, body: BrowserAdjustmentPrepare, req
             body.config_revision,
             body.target_notional,
             body.expected_signer,
+            _owner(request),
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -326,6 +332,7 @@ def submit_browser_adjustment(pair_id: str, body: BrowserAdjustmentSubmit, reque
             body.expected_signer,
             body.action_id,
             [item.model_dump() for item in body.signatures],
+            _owner(request),
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -347,6 +354,7 @@ def execute_pair_adjustment(pair_id: str, body: AdjustmentExecute, request: Requ
             body.config_revision,
             body.target_notional,
             body.confirmation,
+            _owner(request),
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -362,7 +370,7 @@ def execute_pair_adjustment(pair_id: str, body: AdjustmentExecute, request: Requ
 def pair_trade_history(pair_id: str, account_address: str, request: Request) -> dict:
     try:
         return {"data": history_service.list_history(
-            request.app.state.settings.database_url, _descriptor(pair_id), account_address,
+            request.app.state.settings.database_url, _descriptor(pair_id), account_address, _owner(request),
         )}
     except history_service.TradeHistoryError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -373,7 +381,7 @@ def pair_trade_history(pair_id: str, account_address: str, request: Request) -> 
 @router.get("/hyperliquid/pairs/{pair_id}/dashboard")
 def pair_dashboard(pair_id: str, request: Request) -> dict:
     try:
-        return {"data": pairs_service.get_pair_dashboard(pair_id, request.app.state.settings.database_url)}
+        return {"data": pairs_service.get_pair_dashboard(pair_id, request.app.state.settings.database_url, _owner(request))}
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     except pairs_service.PairsConfigError as exc:

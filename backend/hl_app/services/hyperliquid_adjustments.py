@@ -50,14 +50,14 @@ def _execution_ready() -> bool:
     )
 
 
-def _resolve(url: str, pair_id: str, account_address: str, config_revision: str) -> tuple[dict, str]:
+def _resolve(url: str, pair_id: str, account_address: str, config_revision: str, owner_account_id: int | None = None) -> tuple[dict, str]:
     revision, descriptors = pairs_service.load_pairs()
     if revision != config_revision:
         raise AdjustmentError(409, "pair 配置已变化，请刷新页面后重新预览")
     descriptor = next((item for item in descriptors if item["id"] == pair_id), None)
     if descriptor is None:
         raise AdjustmentError(404, f"未知或停用的 pair: {pair_id}")
-    active = accounts_service.apply_active_accounts(url, [descriptor])[0]
+    active = accounts_service.apply_active_accounts(url, [descriptor], owner_account_id)[0]
     expected = active["account_address"]
     supplied = accounts_service.normalize_address(account_address)
     if expected is None or supplied != expected:
@@ -151,11 +151,12 @@ def _run(descriptor: dict, account: str, target: Decimal, execute: bool) -> dict
 
 def preview(
     url: str, pair_id: str, account_address: str, config_revision: str, target_notional: str,
+    owner_account_id: int | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     report = _run(descriptor, account, target, execute=False)
     report["execution_enabled"] = _execution_ready()
     report["browser_wallet_enabled"] = True
@@ -170,13 +171,14 @@ def execute(
     config_revision: str,
     target_notional: str,
     confirmation: str,
+    owner_account_id: int | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
     if confirmation.strip() != _decimal_arg(target):
         raise AdjustmentError(422, "确认金额必须与每腿目标名义完全一致")
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     try:
         return _run(descriptor, account, target, execute=True)
     finally:
@@ -197,11 +199,12 @@ def prepare_browser(
     config_revision: str,
     target_notional: str,
     expected_signer: str,
+    owner_account_id: int | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
     argv = _base_argv(descriptor, account, target, "adjust-prepare")
     argv.extend(["--state-dir", _state_dir(), "--signer", signer])
@@ -242,11 +245,12 @@ def submit_browser(
     expected_signer: str,
     action_id: str,
     signatures: list[dict],
+    owner_account_id: int | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
     checked = _validated_signatures(signatures)
     if (

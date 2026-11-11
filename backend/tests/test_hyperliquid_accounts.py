@@ -31,7 +31,7 @@ def client(monkeypatch, tmp_path):
 
 
 def test_account_endpoints_use_configured_pair(client, monkeypatch) -> None:
-    monkeypatch.setattr(accounts, "list_accounts", lambda url, descriptor: {
+    monkeypatch.setattr(accounts, "list_accounts", lambda url, descriptor, owner=None: {
         "pair_id": descriptor["id"],
         "accounts": [{"id": None, "label": "默认账户", "address": descriptor["account_address"], "is_active": True}],
     })
@@ -41,7 +41,7 @@ def test_account_endpoints_use_configured_pair(client, monkeypatch) -> None:
 
     calls = []
 
-    def add(url, descriptor, label, address):
+    def add(url, descriptor, label, address, owner=None):
         calls.append((url, descriptor["id"], label, address))
         return {"id": 2, "label": label, "address": address, "is_active": True}
 
@@ -50,7 +50,7 @@ def test_account_endpoints_use_configured_pair(client, monkeypatch) -> None:
     assert response.status_code == 201
     assert calls == [("postgresql://runtime", "nbis-crwv", "账户二", SECOND)]
 
-    monkeypatch.setattr(accounts, "activate_account", lambda url, descriptor, account_id: {
+    monkeypatch.setattr(accounts, "activate_account", lambda url, descriptor, account_id, owner=None: {
         "id": account_id, "label": "账户二", "address": SECOND, "is_active": True,
     })
     response = client.put("/api/v1/hyperliquid/pairs/nbis-crwv/accounts/2/activate")
@@ -73,7 +73,7 @@ def test_unknown_pair_and_account_errors(client, monkeypatch) -> None:
 
 def test_dashboard_uses_database_account_and_address_cache_key(client, monkeypatch) -> None:
     selected = {"id": "nbis-crwv", "account_address": SECOND}
-    monkeypatch.setattr(accounts, "apply_active_accounts", lambda _url, descriptors: [
+    monkeypatch.setattr(accounts, "apply_active_accounts", lambda _url, descriptors, owner=None: [
         {**item, "account_address": SECOND} for item in descriptors
     ])
     calls = []

@@ -50,10 +50,12 @@ def _preview_hash(report: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _request_row(cursor, request_id: str, lock: bool = False) -> dict | None:
+def _request_row(cursor, request_id: str, lock: bool = False, owner_account_id: int | None = None) -> dict | None:
+    ownership = "" if owner_account_id is None else " AND owner_account_id = %s"
+    params = (request_id,) if owner_account_id is None else (request_id, owner_account_id)
     cursor.execute(
-        f"SELECT * FROM hyperliquid_execution_requests WHERE request_id = %s{' FOR UPDATE' if lock else ''}",
-        (request_id,),
+        f"SELECT * FROM hyperliquid_execution_requests WHERE request_id = %s{ownership}{' FOR UPDATE' if lock else ''}",
+        params,
     )
     row = cursor.fetchone()
     return dict(row) if row is not None else None
@@ -104,19 +106,19 @@ def preview_managed(
     if type(wallet_version) is not int or wallet_version < 1:
         raise wallets.WalletError(422, "托管钱包版本非法")
     target = adjustments._decimal(target_notional, "每腿目标名义")
-    descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
     payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             existing = _matching_existing(
-                _request_row(cursor, request_id), session, payload_hash
+                _request_row(cursor, request_id, owner_account_id=session.account_id), session, payload_hash
             )
             if existing is not None:
                 return _view(existing)
             _active_wallet(cursor, descriptor, account, wallet_version)
             if wallets._active_execution(cursor, descriptor["network"], pair_id, account):
                 raise wallets.WalletError(409, "存在执行中或待核对的调仓，请完成核对后再预览")
-    report = adjustments.preview(url, pair_id, account, config_revision, target_notional)
+    report = adjustments.preview(url, pair_id, account, config_revision, target_notional, session.account_id)
     preview_hash = _preview_hash(report)
     report.update({
         "request_id": request_id,
@@ -127,7 +129,7 @@ def preview_managed(
         with conn.cursor() as cursor:
             wallets._lock_scope(cursor, descriptor["network"], pair_id, account)
             existing = _matching_existing(
-                _request_row(cursor, request_id, lock=True), session, payload_hash
+                _request_row(cursor, request_id, lock=True, owner_account_id=session.account_id), session, payload_hash
             )
             if existing is not None:
                 return _view(existing)
@@ -139,16 +141,16 @@ def preview_managed(
                 INSERT INTO hyperliquid_execution_requests (
                     request_id, actor, network, pair_id, account_address, config_revision,
                     target_notional, request_payload_hash, preview_hash, wallet_address,
-                    wallet_version, status, result
+                    wallet_version, status, result, owner_account_id
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'previewed', %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'previewed', %s, %s
                 )
                 RETURNING *
                 """,
                 (
                     request_id, wallets._actor(session), descriptor["network"], pair_id, account,
                     config_revision, adjustments._decimal_arg(target), payload_hash, preview_hash,
-                    wallet["wallet_address"], wallet_version, Json(report),
+                    wallet["wallet_address"], wallet_version, Json(report), session.account_id,
                 ),
             )
             return _view(dict(cursor.fetchone()))
@@ -214,13 +216,13 @@ def execute_managed(
     target = adjustments._decimal(target_notional, "每腿目标名义")
     if confirmation.strip() != adjustments._decimal_arg(target):
         raise wallets.WalletError(422, "确认金额必须与每腿目标名义完全一致")
-    descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
     payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             wallets._lock_scope(cursor, descriptor["network"], pair_id, account)
             row = _matching_existing(
-                _request_row(cursor, request_id, lock=True), session, payload_hash
+                _request_row(cursor, request_id, lock=True, owner_account_id=session.account_id), session, payload_hash
             )
             if row is None:
                 raise wallets.WalletError(409, "找不到对应的托管调仓预览，请重新预览")
@@ -294,7 +296,7 @@ def execute_managed(
         ), 200
 
 
-def get_managed_execution(url: str, pair_id: str, request_id: str) -> dict:
+def get_managed_execution(url: str, pair_id: str, request_id: str, owner_account_id: int | None = None) -> dict:
     request_id = _request_id(request_id)
     _revision, descriptors = pairs_service.load_pairs()
     descriptor = next((item for item in descriptors if item["id"] == pair_id), None)
@@ -302,7 +304,7 @@ def get_managed_execution(url: str, pair_id: str, request_id: str) -> dict:
         raise wallets.WalletError(404, "未知或停用的 pair")
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
-            row = _request_row(cursor, request_id)
+            row = _request_row(cursor, request_id, owner_account_id=owner_account_id)
             if row is None or row["pair_id"] != pair_id or row["network"] != descriptor["network"]:
                 raise wallets.WalletError(404, "调仓请求不存在")
             return _view(row)

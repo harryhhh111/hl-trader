@@ -86,6 +86,10 @@ def test_auth_mode_defaults_to_token_and_cloudflare_does_not_need_token() -> Non
     assert settings.auth_mode == "cloudflare_access"
     assert settings.auth_token is None
     assert settings.cloudflare_access_aud == "a" * 64
+    account = Settings.from_env(
+        {"HL_APP_DATABASE_URL": "postgresql://runtime.invalid/hl", "HL_APP_AUTH_MODE": "account"}
+    )
+    assert account.auth_mode == "account" and account.auth_token is None
 
 
 @pytest.mark.parametrize(

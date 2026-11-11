@@ -44,7 +44,8 @@ def _lock_scope(cursor, network: str, pair_id: str, account_address: str) -> Non
 
 
 def _resolve(
-    url: str, pair_id: str, account_address: str, config_revision: str | None = None
+    url: str, pair_id: str, account_address: str, config_revision: str | None = None,
+    owner_account_id: int | None = None,
 ) -> tuple[dict, str]:
     revision, descriptors = pairs_service.load_pairs()
     if config_revision is not None and revision != config_revision:
@@ -52,7 +53,7 @@ def _resolve(
     descriptor = next((item for item in descriptors if item["id"] == pair_id), None)
     if descriptor is None:
         raise WalletError(404, "未知或停用的 pair")
-    active = accounts_service.apply_active_accounts(url, [descriptor])[0]
+    active = accounts_service.apply_active_accounts(url, [descriptor], owner_account_id)[0]
     account = accounts_service.normalize_address(account_address)
     if active["account_address"] != account:
         raise WalletError(409, "当前账户已变化，请刷新后重新操作")
@@ -111,8 +112,8 @@ def _metadata(row: dict | None, active_execution: dict | None = None) -> dict:
     }
 
 
-def get_wallet(url: str, pair_id: str, account_address: str) -> dict:
-    descriptor, account = _resolve(url, pair_id, account_address)
+def get_wallet(url: str, pair_id: str, account_address: str, owner_account_id: int | None = None) -> dict:
+    descriptor, account = _resolve(url, pair_id, account_address, owner_account_id=owner_account_id)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             row = _wallet_row(cursor, descriptor["network"], pair_id, account)
@@ -197,7 +198,7 @@ def issue_challenge(
 ) -> dict:
     if operation not in {"save", "rotate", "delete"}:
         raise WalletError(422, "托管钱包操作类型非法")
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, session.account_id)
     challenge_id = secrets.token_urlsafe(32)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
@@ -282,7 +283,7 @@ def save_wallet(
     payload: dict,
     session: SessionInfo,
 ) -> dict:
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, session.account_id)
     if not isinstance(payload, dict) or not isinstance(payload.get("challenge_id"), str):
         raise WalletError(422, "托管钱包加密请求非法")
     challenge_id = payload["challenge_id"]
@@ -358,9 +359,9 @@ def save_wallet(
                     INSERT INTO hyperliquid_api_wallets (
                         network, pair_id, account_address, wallet_address, wallet_version,
                         status, encrypted_private_key, encryption_version, data_key_id,
-                        authorization_master, authorization_checked_at, created_by, updated_by
+                        authorization_master, authorization_checked_at, created_by, updated_by, owner_account_id
                     ) VALUES (
-                        %s, %s, %s, %s, %s, 'active', %s, 1, %s, %s, now(), %s, %s
+                        %s, %s, %s, %s, %s, 'active', %s, 1, %s, %s, now(), %s, %s, %s
                     )
                     ON CONFLICT (network, pair_id, account_address) DO UPDATE SET
                         wallet_address = EXCLUDED.wallet_address,
@@ -375,7 +376,7 @@ def save_wallet(
                     (
                         descriptor["network"], pair_id, account, wallet_address, new_version,
                         encrypted, os.environ.get("HL_APP_DATA_ENCRYPTION_KEY_ID", "").strip(),
-                        master, actor, actor,
+                        master, actor, actor, session.account_id,
                     ),
                 )
                 row = dict(cursor.fetchone())
@@ -413,7 +414,7 @@ def delete_wallet(
     wallet_version: int,
     session: SessionInfo,
 ) -> dict:
-    descriptor, account = _resolve(url, pair_id, account_address, config_revision)
+    descriptor, account = _resolve(url, pair_id, account_address, config_revision, session.account_id)
     confirmed_address = accounts_service.normalize_address(wallet_address)
     if type(wallet_version) is not int or wallet_version < 1:
         raise WalletError(422, "托管钱包版本非法")

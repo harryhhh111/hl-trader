@@ -65,7 +65,9 @@ docker compose --env-file .runtime/docker.env up --build -d
 
 ### 可切换认证模式
 
-默认 `HL_APP_AUTH_MODE=token`，保留数据库会话、token 初始化/轮换和 CSRF 校验。使用 Cloudflare Access 时在 `.runtime/docker.env` 设置：
+默认 `HL_APP_AUTH_MODE=token`，保留数据库会话、token 初始化/轮换和 CSRF 校验。使用 `HL_APP_AUTH_MODE=account` 时，登录页直接提供邮箱注册和登录，不需要命令创建账号；注册后自动登录，首个注册用户接管已有 Hyperliquid 资源，后续用户的公开账户、托管钱包和调仓记录彼此隔离。密码只保存 PBKDF2-HMAC-SHA256 哈希，session 仍只保存哈希。
+
+使用 Cloudflare Access 时在 `.runtime/docker.env` 设置：
 
 ```sh
 HL_APP_AUTH_MODE=cloudflare_access

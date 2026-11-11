@@ -49,9 +49,17 @@ export const sessionApi = {
   session: () => apiFetch<{
     authenticated: boolean;
     expires_at?: string;
-    auth_mode?: "token" | "cloudflare_access";
+    auth_mode?: "token" | "cloudflare_access" | "account";
     email?: string | null;
   }>("/api/v1/session"),
+  accountLogin: (email: string, password: string) => apiFetch<{ authenticated: boolean; expires_at: string }>("/api/v1/session/account/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  }),
+  accountRegister: (email: string, password: string) => apiFetch<{ authenticated: boolean; expires_at: string }>("/api/v1/session/account/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  }),
   login: (token: string) => apiFetch<{ authenticated: boolean; expires_at: string }>("/api/v1/session/login", {
     method: "POST",
     body: JSON.stringify({ token }),

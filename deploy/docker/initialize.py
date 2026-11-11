@@ -8,7 +8,7 @@ from hl_app.db import connect, migrate
 url = database_url("migration")
 applied = migrate(url)
 print(f"migrations_applied={len(applied)}")
-if os.environ.get("HL_APP_AUTH_MODE", "token") == "cloudflare_access":
+if os.environ.get("HL_APP_AUTH_MODE", "token") in {"cloudflare_access", "account"}:
     print("token auth initialization skipped")
 else:
     token = _auth_token(os.environ)
