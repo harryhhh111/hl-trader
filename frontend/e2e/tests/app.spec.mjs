@@ -207,6 +207,17 @@ test("资讯筛选、置顶与来源状态", async ({ page }, testInfo) => {
   expect(overflow).toBe(false);
 });
 
+test("更新日志可从主导航访问并展示功能记录", async ({ page }, testInfo) => {
+  await login(page);
+  await page.getByRole("link", { name: "更新日志", exact: true }).click();
+  await expect(page).toHaveURL(/\/changelog$/);
+  await expect(page.getByRole("heading", { name: "更新日志", exact: true })).toBeVisible();
+  await expect(page.getByText("调仓过程与结果更清晰", { exact: true })).toBeVisible();
+  await expect(page.getByText("目标仓位调整与托管 API Wallet", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `${evidence}/${testInfo.project.name}-changelog.png`, fullPage: true });
+});
+
 test("退出后受保护页面重新进入登录", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "退出", exact: true }).click();

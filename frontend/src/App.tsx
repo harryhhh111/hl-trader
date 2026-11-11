@@ -6,6 +6,7 @@ import { HyperliquidPairPage } from "@/pages/hyperliquid-pair-page";
 import { LoginPage } from "@/pages/login-page";
 import { WatchlistPage } from "@/pages/watchlist-page";
 import { NewsPage } from "@/pages/news-page";
+import { ChangelogPage } from "@/pages/changelog-page";
 import { Button } from "@/components/ui/button";
 import { sessionApi } from "@/lib/api/client";
 
@@ -33,10 +34,11 @@ function ProtectedLayout() {
     <div className="min-h-screen">
       <header className="border-b bg-background">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <nav aria-label="主导航" className="flex gap-4 text-sm">
+          <nav aria-label="主导航" className="flex flex-wrap gap-4 text-sm">
             <NavLink to="/hyperliquid" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>Hyperliquid</NavLink>
             <NavLink to="/watchlist" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>关注股</NavLink>
             <NavLink to="/news" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>每日资讯</NavLink>
+            <NavLink to="/changelog" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>更新日志</NavLink>
           </nav>
           <Button variant="outline" size="sm" onClick={() => void logout()}>退出</Button>
         </div>
@@ -56,6 +58,7 @@ export default function App() {
         <Route path="/hyperliquid/pairs/:pairId" element={<HyperliquidPairPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/news" element={<NewsPage />} />
+        <Route path="/changelog" element={<ChangelogPage />} />
         <Route path="/" element={<Navigate to="/hyperliquid" replace />} />
         <Route path="*" element={<Navigate to="/hyperliquid" replace />} />
       </Route>
