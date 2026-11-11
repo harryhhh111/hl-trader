@@ -416,24 +416,28 @@ async fn build_plan(
         let current_signed = start_positions[index];
         let current_size = current_signed.abs();
         let delta = target_size - current_size;
-        let (action, order_qty, reduce_only) = if delta > Decimal::ZERO {
+        let (mut action, mut order_qty, reduce_only) = if delta > Decimal::ZERO {
             (if index == 0 { "buy" } else { "sell" }, delta, false)
         } else if delta < Decimal::ZERO {
             (if index == 0 { "sell" } else { "buy" }, -delta, true)
         } else {
             ("none", Decimal::ZERO, false)
         };
-        let protect = if order_qty > Decimal::ZERO {
+        let mut protect = if order_qty > Decimal::ZERO {
             pair::protect_price(market, action == "buy", &book)
                 .map_err(|error| AdjustError::Refused(error.to_string()))?
         } else {
             Decimal::ZERO
         };
+        let mut result = None;
         if order_qty > Decimal::ZERO && order_qty * protect < Decimal::TEN {
-            return Err(AdjustError::Refused(format!(
-                "{} 的调仓差额低于最小下单名义 10 USD，未生成订单",
+            result = Some(format!(
+                "{} 的调仓差额低于最小下单名义 10 USD，已跳过该腿",
                 market.name
-            )));
+            ));
+            action = "none";
+            order_qty = Decimal::ZERO;
+            protect = Decimal::ZERO;
         }
         let cloid = if action_id.is_some() && order_qty > Decimal::ZERO {
             Some(cloid_hex(new_cloid()?))
@@ -465,7 +469,7 @@ async fn build_plan(
             slippage_pct: None,
             slippage_usd: None,
             oid: None,
-            result: None,
+            result,
             final_size: None,
             final_notional: None,
         });
@@ -475,6 +479,13 @@ async fn build_plan(
     } else {
         AdjustmentStatus::Preview
     };
+    let diagnostics = [
+        "目标为每腿绝对名义；数量按市场精度向下取整，实际成交名义可能略有差异".into(),
+        "IOC 未全部成交、拒单或结果未知时停止后续写操作，不自动追单或反向补偿".into(),
+    ]
+    .into_iter()
+    .chain(legs.iter().filter_map(|leg| leg.result.clone()))
+    .collect();
     Ok(Plan {
         report: AdjustmentReport {
             schema_version: 1,
@@ -488,10 +499,7 @@ async fn build_plan(
             target_notional: request.target_notional,
             created_at: now_utc(),
             legs,
-            diagnostics: vec![
-                "目标为每腿绝对名义；数量按市场精度向下取整，实际成交名义可能略有差异".into(),
-                "IOC 未全部成交、拒单或结果未知时停止后续写操作，不自动追单或反向补偿".into(),
-            ],
+            diagnostics,
             expected_signer: None,
             signing_requests: Vec::new(),
         },
@@ -577,7 +585,7 @@ pub async fn run_adjust(
         }
         report
             .diagnostics
-            .push("两腿已处于精度允许的目标数量，无需下单".into());
+            .push("两腿已处于精度允许的目标数量，或差额低于最小下单名义，无需下单".into());
         return Ok(report);
     }
     if !execute {
@@ -722,7 +730,7 @@ pub async fn run_adjust(
     report.status = AdjustmentStatus::Succeeded;
     report
         .diagnostics
-        .push("两腿订单均已全部成交，并已核对交易所实际持仓".into());
+        .push("所有需下单腿均已全部成交，并已核对交易所实际持仓".into());
     save_after_write(&store, &report)?;
     Ok(report)
 }
@@ -838,7 +846,7 @@ pub async fn prepare_browser_adjustment(
         }
         report
             .diagnostics
-            .push("两腿已处于精度允许的目标数量，无需下单".into());
+            .push("两腿已处于精度允许的目标数量，或差额低于最小下单名义，无需下单".into());
         return Ok(report);
     }
     store.archive()?;
@@ -1164,7 +1172,7 @@ pub async fn submit_browser_adjustment(
     report.status = AdjustmentStatus::Succeeded;
     report
         .diagnostics
-        .push("两腿订单均已全部成交，并已核对交易所实际持仓".into());
+        .push("所有需下单腿均已全部成交，并已核对交易所实际持仓".into());
     save_after_write(&store, &report)?;
     Ok(report)
 }
@@ -1400,6 +1408,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn below_minimum_delta_skips_only_that_leg() {
+        let (server, fixture) = setup(vec![account("200.4", "-30"), account("200.4", "-40")]).await;
+        let skipped = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#);
+            then.status(500);
+        });
+        let executed = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#)
+                .body_includes(r#""s":"10""#);
+            then.status(200).body(filled(12, "10", "50"));
+        });
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &fixture.request(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.status, AdjustmentStatus::Succeeded);
+        assert_eq!(report.legs[0].status, AdjustmentLegStatus::NotRequired);
+        assert_eq!(report.legs[0].action, "none");
+        assert_eq!(report.legs[0].order_qty, Decimal::ZERO);
+        assert!(
+            report.legs[0]
+                .result
+                .as_deref()
+                .unwrap()
+                .contains("已跳过该腿")
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("已跳过该腿"))
+        );
+        assert_eq!(report.legs[1].status, AdjustmentLegStatus::Filled);
+        assert_eq!(report.legs[0].final_size, Some(Decimal::new(2004, 1)));
+        assert_eq!(report.legs[1].final_size, Some(Decimal::new(40, 0)));
+        assert_eq!(skipped.calls(), 0);
+        assert_eq!(executed.calls(), 1);
+    }
+
+    #[tokio::test]
     async fn execute_reduces_before_increasing_and_checks_actual_positions() {
         let (server, fixture) = setup(vec![account("250", "-30"), account("200", "-40")]).await;
         let reduce = server.mock(|when, then| {
@@ -1625,6 +1681,58 @@ mod tests {
             );
         }
         assert_eq!(exchange.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn browser_adjustment_signs_and_submits_only_leg_above_minimum() {
+        let (server, fixture) = setup(vec![
+            account("200.4", "-30"),
+            account("200.4", "-30"),
+            account("200.4", "-40"),
+        ])
+        .await;
+        let skipped = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#);
+            then.status(500);
+        });
+        let executed = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#)
+                .body_includes(r#""s":"10""#);
+            then.status(200).body(filled(12, "10", "50"));
+        });
+        let adapter = Adapter::with_base_url(&server.base_url());
+        let api_wallet = test_wallet();
+        let prepared =
+            prepare_browser_adjustment(&adapter, &fixture.request(), api_wallet.address())
+                .await
+                .unwrap();
+        assert_eq!(prepared.signing_requests.len(), 1);
+        assert_eq!(prepared.signing_requests[0].leg_index, 1);
+        assert_eq!(prepared.legs[0].status, AdjustmentLegStatus::NotRequired);
+        assert!(
+            prepared.legs[0]
+                .result
+                .as_deref()
+                .unwrap()
+                .contains("已跳过该腿")
+        );
+        let report = submit_browser_adjustment(
+            &adapter,
+            &fixture.request(),
+            api_wallet.address(),
+            prepared.action_id.as_deref().unwrap(),
+            sign_browser_requests(&prepared, &api_wallet),
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.status, AdjustmentStatus::Succeeded);
+        assert_eq!(report.legs[1].status, AdjustmentLegStatus::Filled);
+        assert_eq!(skipped.calls(), 0);
+        assert_eq!(executed.calls(), 1);
     }
 
     #[tokio::test]

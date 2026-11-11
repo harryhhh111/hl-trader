@@ -362,7 +362,7 @@ export function PositionAdjustment({ descriptor, configRevision }: {
                       <td className="pr-4 font-mono">{leg.action === 'none' ? '—' : leg.protect_px}</td>
                       <td className="pr-4 font-mono">{dash(leg.avg_px)}</td>
                       <td className="pr-4 font-mono text-xs">{slippageLabel(leg.slippage_pct, leg.slippage_usd)}</td>
-                      <td className="pr-4 text-xs">{isExecutionResult ? leg.result ?? leg.status : report.status === 'prepared' ? '待签名' : '待确认'}</td>
+                      <td className="pr-4 text-xs">{leg.result ?? (isExecutionResult ? leg.status : report.status === 'prepared' ? '待签名' : '待确认')}</td>
                     </tr>
                   ))}</tbody>
                 </table>

@@ -56,7 +56,7 @@ export function HyperliquidAdjustmentGuidePage() {
                   ['1500 USD', '2000 USD', '增加约 500 USD；NBIS 买入，CRWV 卖出增加空仓'],
                   ['2500 USD', '2000 USD', '减少约 500 USD；使用 reduce-only，方向与增仓相反'],
                   ['1990 USD', '2000 USD', '差额约 10 USD，可生成增仓单，但仍须通过精度和保护价校验'],
-                  ['1995 USD', '2000 USD', '差额约 5 USD，低于最低下单名义，预览拒绝，不会下单'],
+                  ['1995 USD', '2000 USD', '差额约 5 USD，低于最低下单名义，提示并跳过该腿；另一腿不受影响'],
                   ['任意仓位', '0 USD', '以 reduce-only 平掉该腿；两腿都按 0 处理'],
                 ].map(([current, target, behavior]) => (
                   <tr key={current} className="border-b last:border-0">
@@ -68,7 +68,7 @@ export function HyperliquidAdjustmentGuidePage() {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-muted-foreground">两腿会一起预检；任一腿的差额低于最低下单名义，整个预览都会拒绝，不会先给另一腿下单。</p>
+          <p className="text-xs text-muted-foreground">两腿会一起预检；差额低于最低下单名义的腿会显示提示并跳过，不再阻塞另一腿预览或下单。</p>
         </CardContent>
       </Card>
 
