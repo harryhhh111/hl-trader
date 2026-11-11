@@ -82,6 +82,7 @@ services:
 
   worker:
     <<: *web-image
+    command: ["python", "-m", "hl_app.workers", "--run"]
     restart: unless-stopped
     init: true
     read_only: true
