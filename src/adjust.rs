@@ -210,15 +210,15 @@ impl AdjustStore {
     }
 }
 
-fn now_utc() -> String {
+pub(crate) fn now_utc() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn new_cloid() -> Result<Cloid, AdjustError> {
+pub(crate) fn new_cloid() -> Result<Cloid, AdjustError> {
     pair::gen_cloid().map_err(|e| AdjustError::State(e.to_string()))
 }
 
-fn signed_position(account: &AccountView, coin: &str) -> Decimal {
+pub(crate) fn signed_position(account: &AccountView, coin: &str) -> Decimal {
     account
         .positions
         .iter()
@@ -778,7 +778,7 @@ fn chain_for(request: &AdjustRequest<'_>) -> Chain {
     }
 }
 
-fn typed_data_for(
+pub(crate) fn typed_data_for(
     action: &Action,
     nonce: u64,
     chain: Chain,
@@ -912,7 +912,7 @@ fn classify_place_result(result: Result<PlaceOutcome, AdapterError>, qty: Decima
     }
 }
 
-fn normalize_signature(mut signature: Signature) -> Result<Signature, AdjustError> {
+pub(crate) fn normalize_signature(mut signature: Signature) -> Result<Signature, AdjustError> {
     signature.v = match signature.v {
         0 => 27,
         1 => 28,

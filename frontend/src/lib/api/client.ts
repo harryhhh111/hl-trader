@@ -88,6 +88,43 @@ export const hyperliquidPairsApi = {
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/risk`,
     { method: "PUT", body: JSON.stringify(body) },
   ),
+  prepareLeverage: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    leverage: number;
+    margin_mode: 'cross' | 'isolated';
+    expected_signer: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlLeverageReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/leverage/browser-prepare`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  submitLeverage: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    leverage: number;
+    margin_mode: 'cross' | 'isolated';
+    expected_signer: string;
+    action_id: string;
+    signature: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlLeverageReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/leverage/browser-submit`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  executeManagedLeverage: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    leverage: number;
+    margin_mode: 'cross' | 'isolated';
+    request_id: string;
+    wallet_version: number;
+    confirmation: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlLeverageReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/leverage/managed-execute`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
   accounts: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccounts>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts`,
   ),
@@ -191,6 +228,9 @@ export const hyperliquidPairsApi = {
     { method: "POST", body: JSON.stringify(body) },
   ),
   managedAdjustment: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
+  ),
+  managedLeverage: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlLeverageReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
   ),
   announcements: () => apiFetch<import("@/lib/types/hyperliquid").HlV2Announcements>("/api/v1/hyperliquid/announcements"),

@@ -53,7 +53,7 @@ test('未知诊断原文返回', () => {
 function leg(coin: string, side: HlV2Position['side']): HlV2Position {
   return {
     coin, side, size: '1', entry_px: '1', mark_px: '1', notional: '1',
-    unrealized_pnl: '0', margin_mode: 'cross', margin_used: '1', liquidation_px: null,
+    unrealized_pnl: '0', margin_mode: 'cross', leverage: 3, max_leverage: 5, margin_used: '1', liquidation_px: null,
   };
 }
 

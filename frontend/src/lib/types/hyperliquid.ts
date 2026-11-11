@@ -158,6 +158,8 @@ export interface HlV2Position {
   notional: string | null;
   unrealized_pnl: string | null;
   margin_mode: 'cross' | 'isolated' | null;
+  leverage: number | null;
+  max_leverage: number | null;
   margin_used: string | null;
   liquidation_px: string | null;
 }
@@ -238,6 +240,29 @@ export interface HlV2Announcements {
   schema_version: 2;
   queried_at: string;
   block: HlAnnouncementsBlock;
+}
+
+export interface HlLeverageReport {
+  schema_version: 1;
+  status: 'prepared' | 'executing' | 'succeeded' | 'rejected' | 'unknown';
+  action_id: string | null;
+  request_id?: string;
+  pair_id: string;
+  network: 'mainnet' | 'testnet';
+  config_revision: string;
+  account_address: string;
+  coin: string;
+  current_leverage?: number;
+  current_margin_mode?: 'cross' | 'isolated';
+  leverage: number;
+  margin_mode: 'cross' | 'isolated';
+  max_leverage?: number;
+  expected_signer?: string;
+  nonce?: number;
+  typed_data?: Record<string, unknown>;
+  result?: string | null;
+  managed_status?: 'running' | 'succeeded' | 'incomplete' | 'failed' | 'unknown';
+  error_code?: string | null;
 }
 
 export type HlRiskStatus = 'disabled' | 'monitoring' | 'triggered' | 'executing' | 'completed' | 'incomplete' | 'unknown' | 'unavailable';

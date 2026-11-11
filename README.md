@@ -1,13 +1,14 @@
 # hl-trader
 
-Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及独立的 v2 多 pair 主网/测试网**只读看板**。
+Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看板、人工确认的目标仓位调整、托管 API Wallet、用户注册，以及 Pair 风险监控；另有关注股与每日资讯。旧 `order/open/close/cancel/margin` 交易入口仍仅使用测试网。
 
-**默认 dry-run**：不加 `--execute` 时，不加载私钥、不生成签名、不发送任何写请求。
+**交易 CLI 默认 dry-run**：`order/open/close/cancel/margin/adjust` 不加 `--execute` 时，不加载私钥、不生成签名、不发送交易写请求。Web 的浏览器签名和托管执行使用各自显式确认入口；风险监控 worker 不执行交易。
 
 ## 文档
 
-- 独立 Web 应用迁移执行方案（供 Kimi 按阶段实施）：[INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md](docs/INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md)。
-- 当前 v2 验收状态与上线前待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
+- 当前功能、未完成项与验收记录适用范围：[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+- 独立 Web 应用原迁移执行方案（A–H 已交付，保留历史范围）：[INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md](docs/INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md)。
+- v2 看板历史验收基线与当前复验待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
 - 历史设计方案（仅用于追溯）：[MVP_PLAN.md](docs/archive/MVP_PLAN.md)、[PHASE2_PLAN.md](docs/archive/PHASE2_PLAN.md)。
 - 独立应用迁移记录：[来源清单](docs/migration/SOURCE_MAP.md)、[执行进展](docs/migration/PROGRESS.md)、[数据与回退合同](docs/migration/DATA_CONTRACT.md)、[验收证据](docs/migration/ACCEPTANCE.md)。
@@ -16,10 +17,13 @@ Hyperliquid 命令行工具：包含**测试网**交易与 pair 操作，以及�
 - 调仓盘口轮询与成交滑点实施合同：[HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md](docs/HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md)。
 - Pair 止盈止损监控、人工平仓与后续自动化边界：[HYPERLIQUID_PAIR_RISK_AUTOMATION.md](docs/HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
 - 阈值再平衡第一版后续规划：[HYPERLIQUID_THRESHOLD_REBALANCING.md](docs/HYPERLIQUID_THRESHOLD_REBALANCING.md)。
+- 多 Pair 的 cross / isolated 与跨 DEX 保证金边界：[HYPERLIQUID_MARGIN_MODES.md](docs/HYPERLIQUID_MARGIN_MODES.md)。
 
-## 独立 Web 应用（迁移实施中）
+## 独立 Web 应用
 
-需要 Python 3.11+、Node.js 22+ 和独立 PostgreSQL。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
+截至 `87ffcd8`，原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点和风险提醒。全自动止盈止损、阈值再平衡及 stock_data 资讯同步消费端尚未实现；实际部署版本另行核对。
+
+需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
 
 ```sh
 python3 -m venv .venv
@@ -223,6 +227,10 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损 USD 金额。独立 worker 默认每 30 秒读取最新两腿持仓，以未实现盈亏之和判断阈值；数据缺失、过期或身份不一致时不触发。达到条件后页面显示提醒和“预览并人工平仓”，复用目标为 `0` 的调仓弹窗，由用户重新核对并签名，监控 worker 不持有私钥、不发送订单。规则、触发和人工执行结果持久化，重复检查不会重复生成提醒；worker 停止或状态过期时页面明确提示。
 
 该口径不包含历史已实现盈亏、资金费和手续费。全自动止盈止损尚未实现；IOC 部分成交、断线和裸露仓位风险仍按现有调仓回执处理。
+
+### 单合约杠杆与保证金模式
+
+仓位表显示每腿当前杠杆、市场上限和保证金模式。每个合约均可通过“调杠杆”显式选择 `cross` / `isolated` 和正整数倍数，空仓时也可在下单前设置。托管、浏览器本地和扩展钱包使用同一签名核对链路；执行前后检查账户、资产 ID、仓位和当前杠杆，成功后重新读取交易所状态。该操作不影响另一腿、不附带下单，结果未知时禁止直接重试。
 
 ### 两腿目标仓位调整
 

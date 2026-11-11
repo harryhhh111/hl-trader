@@ -102,6 +102,50 @@ test("Pair 风险规则保存后展示触发提醒和人工平仓预览", async 
   await expect(dialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
 });
 
+test("单合约杠杆展示并经人工确认完成托管调整", async ({ page }) => {
+  const actionId = `leverage-0x${"cd".repeat(16)}`;
+  let requestBody;
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/leverage/managed-execute", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: {
+        schema_version: 1, status: "succeeded", action_id: actionId,
+        request_id: requestBody.request_id, pair_id: "nbis-crwv", network: "mainnet",
+        config_revision: requestBody.config_revision, account_address: requestBody.account_address,
+        coin: "xyz:NBIS", current_leverage: 3, current_margin_mode: "cross",
+        leverage: 2, margin_mode: "isolated", max_leverage: 5,
+        result: "已设置 xyz:NBIS isolated 2x", managed_status: "succeeded",
+      } }),
+    });
+  });
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/api-wallet?*", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data: {
+      configured: true, network: "mainnet", pair_id: "nbis-crwv",
+      account_address: "0x0000000000000000000000000000000000000043",
+      wallet_address: "0x1111111111111111111111111111111111111111", wallet_version: 1,
+      authorization_checked_at: "2026-11-11T00:00:00Z", created_at: null, updated_at: null,
+      active_execution: null,
+    } }),
+  }));
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await page.getByRole("button", { name: "调整 xyz:NBIS 杠杆", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "调整 xyz:NBIS 杠杆", exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("目标杠杆").fill("2");
+  await dialog.getByLabel("保证金模式").selectOption("isolated");
+  await dialog.getByLabel("确认杠杆调整").fill("xyz:NBIS isolated 2x");
+  await dialog.getByRole("button", { name: "确认调整杠杆", exact: true }).click();
+  await expect(dialog.getByText("杠杆已调整并核对", { exact: true })).toBeVisible();
+  expect(requestBody.leverage).toBe(2);
+  expect(requestBody.margin_mode).toBe("isolated");
+  expect(requestBody.confirmation).toBe("xyz:NBIS isolated 2x");
+});
+
 test("pair 页面底部展示调仓交易历史", async ({ page }) => {
   const actionId = `adjust-0x${"ab".repeat(16)}`;
   await page.route("**/api/v1/hyperliquid/pairs/hype-btc/trade-history?*", (route) => route.fulfill({

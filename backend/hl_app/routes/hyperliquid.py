@@ -10,6 +10,7 @@ from ..auth import require_session
 from ..services import hyperliquid_accounts as accounts_service
 from ..services import hyperliquid_adjustments as adjustments_service
 from ..services import hyperliquid_history as history_service
+from ..services import hyperliquid_leverage as leverage_service
 from ..services import hyperliquid_pairs as pairs_service
 from ..services import hyperliquid_quotes as quotes_service
 from ..services import hyperliquid_risk as risk_service
@@ -92,6 +93,31 @@ class RiskRuleSave(BaseModel):
     stop_loss_usd: str | None = Field(default=None, max_length=40)
 
     model_config = {"extra": "forbid"}
+
+
+class LeverageRequest(BaseModel):
+    account_address: str = Field(min_length=42, max_length=42)
+    config_revision: str = Field(min_length=64, max_length=64)
+    coin: str = Field(min_length=1, max_length=64)
+    leverage: int = Field(ge=1)
+    margin_mode: str = Field(pattern="^(cross|isolated)$")
+
+    model_config = {"extra": "forbid"}
+
+
+class BrowserLeveragePrepare(LeverageRequest):
+    expected_signer: str = Field(min_length=42, max_length=42)
+
+
+class BrowserLeverageSubmit(BrowserLeveragePrepare):
+    action_id: str = Field(min_length=43, max_length=43)
+    signature: str = Field(min_length=132, max_length=132)
+
+
+class ManagedLeverageExecute(LeverageRequest):
+    request_id: str = Field(min_length=36, max_length=36)
+    wallet_version: int = Field(ge=1)
+    confirmation: str = Field(min_length=1, max_length=100)
 
 
 class ManagedAdjustmentPreview(AdjustmentPreview):
@@ -274,6 +300,43 @@ def save_pair_risk(pair_id: str, body: RiskRuleSave, request: Request) -> dict:
         )}
     except Exception as exc:
         raise _risk_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/leverage/browser-prepare")
+def prepare_browser_leverage(pair_id: str, body: BrowserLeveragePrepare, request: Request) -> dict:
+    try:
+        return {"data": leverage_service.prepare_browser(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.leverage, body.margin_mode,
+            body.expected_signer, _owner(request),
+        )}
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/leverage/browser-submit")
+def submit_browser_leverage(pair_id: str, body: BrowserLeverageSubmit, request: Request) -> dict:
+    try:
+        return {"data": leverage_service.submit_browser(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.leverage, body.margin_mode,
+            body.expected_signer, body.action_id, body.signature, _owner(request),
+        )}
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/leverage/managed-execute")
+def execute_managed_leverage(pair_id: str, body: ManagedLeverageExecute, request: Request) -> dict:
+    try:
+        result, status = leverage_service.execute_managed(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.leverage, body.margin_mode,
+            body.confirmation, body.request_id, body.wallet_version, request.state.session,
+        )
+        return JSONResponse({"data": result}, status_code=status)
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
 
 
 @router.get("/hyperliquid/pairs/{pair_id}/adjustment-quote")

@@ -403,6 +403,9 @@ def _valid_position(item, coins: set) -> bool:
         return False
     if item.get("margin_mode") is not None and item.get("margin_mode") not in MARGIN_MODES:
         return False
+    for key in ("leverage", "max_leverage"):
+        if item.get(key) is not None and (type(item[key]) is not int or item[key] < 1):
+            return False
     return True
 
 

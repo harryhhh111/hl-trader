@@ -8,6 +8,7 @@ mod config;
 mod dashboard;
 mod hyperliquid;
 mod intel;
+mod leverage;
 mod pair;
 mod receipt;
 mod snapshot;
@@ -206,6 +207,71 @@ enum Commands {
         #[arg(long, required = true)]
         json: bool,
     },
+    /// 生成由浏览器 API Wallet 签名的单合约杠杆调整，不发送写请求。
+    LeveragePrepare {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        leverage: u32,
+        #[arg(long)]
+        margin_mode: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 校验浏览器签名并提交单合约杠杆调整。
+    LeverageSubmit {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        leverage: u32,
+        #[arg(long)]
+        margin_mode: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long)]
+        action_id: String,
+        #[arg(long)]
+        signature: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 使用托管 API Wallet 显式执行单合约杠杆调整。
+    LeverageExecute {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        leverage: u32,
+        #[arg(long)]
+        margin_mode: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long, conflicts_with = "secret_fd")]
+        secret_file: Option<PathBuf>,
+        #[arg(long)]
+        secret_fd: Option<std::os::fd::RawFd>,
+        #[arg(long)]
+        request_id: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
     /// 多 pair 主网只读看板（v2）：--config 是 JSON pair 配置；只读、不装载私钥。
     Dashboard {
         /// 采集指定 pair id 的快照；与 --announcements 二选一。
@@ -336,6 +402,80 @@ async fn main() -> ExitCode {
                 },
                 action_id,
                 signatures,
+            )
+            .await
+        }
+        Commands::LeveragePrepare {
+            pair,
+            address,
+            coin,
+            leverage,
+            margin_mode,
+            state_dir,
+            signer,
+            json: _,
+        } => {
+            cmd_leverage_prepare(
+                &config_path,
+                pair,
+                address,
+                coin,
+                leverage,
+                margin_mode,
+                state_dir,
+                signer,
+            )
+            .await
+        }
+        Commands::LeverageSubmit {
+            pair,
+            address,
+            coin,
+            leverage,
+            margin_mode,
+            state_dir,
+            signer,
+            action_id,
+            signature,
+            json: _,
+        } => {
+            cmd_leverage_submit(
+                &config_path,
+                pair,
+                address,
+                coin,
+                leverage,
+                margin_mode,
+                state_dir,
+                signer,
+                action_id,
+                signature,
+            )
+            .await
+        }
+        Commands::LeverageExecute {
+            pair,
+            address,
+            coin,
+            leverage,
+            margin_mode,
+            state_dir,
+            secret_file,
+            secret_fd,
+            request_id,
+            json: _,
+        } => {
+            cmd_leverage_execute(
+                &config_path,
+                pair,
+                address,
+                coin,
+                leverage,
+                margin_mode,
+                state_dir,
+                secret_file,
+                secret_fd,
+                request_id,
             )
             .await
         }
@@ -1250,6 +1390,236 @@ async fn cmd_adjust_submit(
             signatures,
         )
         .await,
+    )
+}
+
+struct LeverageCommand {
+    pair_id: String,
+    address: String,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    signer: String,
+}
+
+struct LeverageContext {
+    config: dashboard::config::DashboardConfig,
+    path: PathBuf,
+    pair: dashboard::config::DashboardPair,
+    account: Address,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    signer: Address,
+}
+
+impl LeverageContext {
+    fn request(&self) -> leverage::LeverageRequest<'_> {
+        leverage::LeverageRequest {
+            pair: &self.pair,
+            config_path: &self.path,
+            config_revision: &self.config.revision,
+            account: self.account,
+            coin: &self.coin,
+            leverage: self.leverage,
+            margin_mode: &self.margin_mode,
+            state_dir: &self.state_dir,
+        }
+    }
+}
+
+fn load_leverage_context(
+    config_path: &std::path::Path,
+    command: LeverageCommand,
+) -> Result<LeverageContext, ExitCode> {
+    let config = match dashboard::config::load(config_path) {
+        Ok(config) => config,
+        Err(error) => return Err(usage_err(format!("pair 配置错误: {error}"))),
+    };
+    let pair = match config.enabled_pair(&command.pair_id) {
+        Some(pair) => pair.clone(),
+        None => return Err(usage_err(format!("未知或停用的 pair: {}", command.pair_id))),
+    };
+    let account = match command.address.parse::<Address>() {
+        Ok(account) if account != Address::ZERO => account,
+        Ok(_) => return Err(usage_err("账户地址不能是零地址")),
+        Err(error) => return Err(usage_err(format!("账户地址非法: {error}"))),
+    };
+    let signer = match command.signer.parse::<Address>() {
+        Ok(signer) if signer != Address::ZERO && signer != account => signer,
+        Ok(_) => return Err(usage_err("签名地址必须是非零且不同于交易账户的 API Wallet")),
+        Err(error) => return Err(usage_err(format!("API Wallet 地址非法: {error}"))),
+    };
+    if let Err(error) = Adapter::check_clock() {
+        return Err(runtime_err(error));
+    }
+    Ok(LeverageContext {
+        config,
+        pair,
+        account,
+        coin: command.coin,
+        leverage: command.leverage,
+        margin_mode: command.margin_mode,
+        state_dir: command.state_dir,
+        signer,
+        path: config_path.to_path_buf(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn leverage_command(
+    pair: String,
+    address: String,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    signer: String,
+) -> LeverageCommand {
+    LeverageCommand {
+        pair_id: pair,
+        address,
+        coin,
+        leverage,
+        margin_mode,
+        state_dir,
+        signer,
+    }
+}
+
+fn leverage_result(result: Result<leverage::LeverageReport, adjust::AdjustError>) -> ExitCode {
+    match result {
+        Ok(report) => {
+            let code = match report.status.as_str() {
+                "prepared" | "succeeded" => EXIT_OK,
+                "unknown" => EXIT_UNKNOWN,
+                _ => EXIT_ERROR,
+            };
+            match serde_json::to_string(&report) {
+                Ok(json) => println!("{json}"),
+                Err(error) => return runtime_err(format!("杠杆结果序列化失败: {error}")),
+            }
+            ExitCode::from(code)
+        }
+        Err(adjust::AdjustError::Refused(message)) => usage_err(message),
+        Err(error) => runtime_err(error),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_leverage_prepare(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    signer: String,
+) -> ExitCode {
+    let command = leverage_command(
+        pair,
+        address,
+        coin,
+        leverage,
+        margin_mode,
+        state_dir,
+        signer,
+    );
+    let context = match load_leverage_context(config_path, command) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    leverage_result(leverage::prepare(&adapter, &context.request(), context.signer, None).await)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_leverage_submit(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    signer: String,
+    action_id: String,
+    signature: String,
+) -> ExitCode {
+    let command = leverage_command(
+        pair,
+        address,
+        coin,
+        leverage,
+        margin_mode,
+        state_dir,
+        signer,
+    );
+    let context = match load_leverage_context(config_path, command) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let signature = match signature.parse() {
+        Ok(signature) => signature,
+        Err(error) => return usage_err(format!("签名非法: {error}")),
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    leverage_result(
+        leverage::submit(
+            &adapter,
+            &context.request(),
+            context.signer,
+            &action_id,
+            signature,
+        )
+        .await,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_leverage_execute(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    leverage: u32,
+    margin_mode: String,
+    state_dir: PathBuf,
+    secret_file: Option<PathBuf>,
+    secret_fd: Option<std::os::fd::RawFd>,
+    request_id: String,
+) -> ExitCode {
+    if !valid_request_id(&request_id) {
+        return usage_err("--request-id 必须是 UUID 格式");
+    }
+    let signer = match (secret_file, secret_fd) {
+        (Some(path), None) => load_agent_signer(&path),
+        (None, Some(fd)) => load_agent_signer_fd(fd),
+        _ => return usage_err("必须且只能提供 --secret-file 或 --secret-fd"),
+    };
+    let signer = match signer {
+        Ok(signer) => signer,
+        Err(error) => return usage_err(format!("私钥加载被拒绝: {error}")),
+    };
+    let command = leverage_command(
+        pair,
+        address,
+        coin,
+        leverage,
+        margin_mode,
+        state_dir,
+        format!("{}", signer.address()).to_lowercase(),
+    );
+    let context = match load_leverage_context(config_path, command) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    leverage_result(
+        leverage::execute_managed(&adapter, &signer, &context.request(), &request_id).await,
     )
 }
 

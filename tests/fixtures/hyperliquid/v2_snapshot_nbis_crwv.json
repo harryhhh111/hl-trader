@@ -62,6 +62,8 @@
                     "notional": "979.02",
                     "unrealized_pnl": "4.4084",
                     "margin_mode": "isolated",
+                    "leverage": 3,
+                    "max_leverage": 5,
                     "margin_used": "691.590421",
                     "liquidation_px": "50.4262419298"
                 },
@@ -74,6 +76,8 @@
                     "notional": "961.82",
                     "unrealized_pnl": "3.552",
                     "margin_mode": "isolated",
+                    "leverage": 3,
+                    "max_leverage": 5,
                     "margin_used": "685.243105",
                     "liquidation_px": "98.039708631"
                 }

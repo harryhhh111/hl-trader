@@ -127,7 +127,7 @@ fn classify_action_error<T: std::fmt::Debug>(e: ActionError<T>) -> AdapterError 
 }
 
 fn classify_info_error(e: anyhow::Error) -> AdapterError {
-    classify_message(&e.to_string(), false)
+    classify_message(&format!("{e:#}"), false)
 }
 
 /// 解析用户提供的 cloid：0x 开头的 32 字节十六进制。
@@ -675,18 +675,44 @@ impl Adapter {
         Err(AdapterError::BadResponse("成交历史超过本次分页上限".into()))
     }
 
-    pub async fn cross_margin(&self, user: Address, coin: &str) -> Result<bool, AdapterError> {
+    pub async fn leverage_for(
+        &self,
+        user: Address,
+        coin: &str,
+    ) -> Result<UserLeverage, AdapterError> {
         let data = self
             .client
             .active_asset_data(user, coin.into())
             .await
             .map_err(classify_info_error)?;
         if data.user != user || data.coin != coin {
-            return Err(AdapterError::BadResponse(
-                "保证金模式响应账户/市场不匹配".into(),
-            ));
+            return Err(AdapterError::BadResponse("杠杆响应账户/市场不匹配".into()));
         }
-        Ok(data.leverage.leverage_type == "cross")
+        Ok(data.leverage)
+    }
+
+    pub async fn cross_margin(&self, user: Address, coin: &str) -> Result<bool, AdapterError> {
+        Ok(self.leverage_for(user, coin).await?.leverage_type == "cross")
+    }
+
+    pub async fn update_signed_leverage(
+        &self,
+        request: hypersdk::hypercore::api::ActionRequest,
+    ) -> Result<Option<String>, AdapterError> {
+        use hypersdk::hypercore::api::{OkResponse, Response};
+
+        let response = self
+            .client
+            .send(request)
+            .await
+            .map_err(|error| classify_message(&format!("{error:#}"), true))?;
+        match response {
+            Response::Ok(OkResponse::Default) => Ok(None),
+            Response::Err(message) => Ok(Some(message)),
+            other => Err(AdapterError::BadResponse(format!(
+                "杠杆调整响应类型无法识别: {other:?}"
+            ))),
+        }
     }
 
     /// 把某永续标的设置为全仓模式并指定杠杆（pair 开仓的前提条件）。

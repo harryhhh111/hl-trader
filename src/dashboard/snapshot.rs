@@ -127,6 +127,8 @@ pub struct PositionItem {
     pub notional: Option<String>,
     pub unrealized_pnl: Option<String>,
     pub margin_mode: Option<&'static str>,
+    pub leverage: Option<u32>,
+    pub max_leverage: Option<u32>,
     pub margin_used: Option<String>,
     pub liquidation_px: Option<String>,
 }
@@ -786,6 +788,8 @@ fn build_positions_block(
                             hypersdk::hypercore::types::LeverageType::Cross => "cross",
                             hypersdk::hypercore::types::LeverageType::Isolated => "isolated",
                         }),
+                        leverage: Some(p.leverage.value),
+                        max_leverage: Some(p.max_leverage),
                         margin_used: Some(p.margin_used.to_string()),
                         liquidation_px: p.liquidation_px.map(|x| x.to_string()),
                     });
