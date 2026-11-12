@@ -1,19 +1,19 @@
 # 项目功能与验收状态
 
-核对日期：2026-11-12。代码范围：`5b9dbcc` 及本次 Cross / 3x 下单前检查改动。本页区分代码、回归和实际部署证据；真实订单仍需独立验收。
+核对日期：2026-11-12。代码范围：`950e9a4`（Cross / 3x）和 `c79c441`（同账户跨 pair 钱包共享）。本页区分代码、回归和实际部署证据；真实订单仍需独立验收。
 
 ## 已实现的能力
 
 | 能力 | 当前代码状态 | 主要提交或依据 |
 | --- | --- | --- |
 | 独立 Web 应用 | React、FastAPI、PostgreSQL；Hyperliquid 看板、关注股、资讯、AI 草稿；原迁移 A–H 已交付 | [迁移执行记录](migration/PROGRESS.md)、[历史验收证据](migration/ACCEPTANCE.md) |
-| 目标仓位调整与托管钱包 | 公开地址切换、浏览器本地/扩展钱包签名、托管 API Wallet、交易历史；托管路径包含授权核对、challenge、钱包版本、请求幂等及 memfd 传钥 | `17f530f`；[托管钱包说明](HYPERLIQUID_MANAGED_API_WALLET_PLAN.md) |
+| 目标仓位调整与托管钱包 | 公开地址切换、浏览器本地/扩展钱包签名、托管 API Wallet、交易历史；托管路径包含授权核对、challenge、钱包版本、请求幂等及 memfd 传钥；同账户可跨 pair 共享钱包并串行化写入 | `17f530f`、`c79c441`；[托管钱包说明](HYPERLIQUID_MANAGED_API_WALLET_PLAN.md) |
 | 实时盘口和滑点 | 弹窗空闲时每 5 秒读取两腿 BBO；价格变化要求重新预览；结果与历史展示成交滑点 | `8280372`；[盘口与滑点合同](HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md) |
 | 账号注册与登录 | `account` 模式提供邮箱密码注册/登录，Hyperliquid 资源接入用户归属；另保留 token 和 Cloudflare Access 模式 | `0c516bb`；认证异常不回退 token 表单的修复为 `d030122` |
 | 更新日志 | `/changelog` 展示人工维护的发布说明；页面条目不是完整 Git 提交清单 | `cb3cc0e` |
 | 小额调仓差额处理 | 某腿保护价名义不足 10 USD 时跳过并提示，不再阻止另一腿符合条件的订单 | `9e3ad44` |
 | Pair 止盈止损 | 两腿当前未实现盈亏合计、USD 阈值、只读 worker、页面触发提醒和人工确认平仓；规则与事件按用户、pair 和账户关联 | `87ffcd8`；[风险监控说明](HYPERLIQUID_PAIR_RISK_AUTOMATION.md) |
-| 杠杆与增仓前检查 | 显示并手动调整逐合约 Cross / isolated 和 1–3x；增仓在签名、提交及逐腿发送前重读设置，纯减仓和平仓不被该检查阻塞 | `5b9dbcc` 及本次改动；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
+| 杠杆与增仓前检查 | 显示并手动调整逐合约 Cross / isolated 和 1–3x；增仓在签名、提交及逐腿发送前重读设置，纯减仓和平仓不被该检查阻塞 | `5b9dbcc`、`950e9a4`；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
 
 当前有序数据库迁移为 `001`–`011`。新增代码或迁移文件不代表运行环境已经应用；执行迁移、重建容器和变更真实交易配置仍需明确授权。
 

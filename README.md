@@ -21,7 +21,7 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 
 ## 独立 Web 应用
 
-截至 `87ffcd8`，原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点和风险提醒。全自动止盈止损、阈值再平衡及 stock_data 资讯同步消费端尚未实现；实际部署版本另行核对。
+原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。全自动止盈止损、阈值再平衡及 stock_data 资讯同步消费端尚未实现；实际部署版本另行核对。
 
 需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
 

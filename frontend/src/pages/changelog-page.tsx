@@ -20,6 +20,17 @@ interface Release {
 
 const releases: Release[] = [
   {
+    date: '2026-11-12',
+    title: 'Pair 风控与下单前检查',
+    description: '补充整体止盈止损、杠杆管理和共享钱包的账户边界。',
+    changes: [
+      { kind: '新功能', text: '新增 Pair 整体浮盈亏止盈止损监控；触发后由用户重新预览并人工确认平仓，不会自动下单。' },
+      { kind: '新功能', text: '新增逐合约杠杆和 Cross / isolated 调整；增仓前检查最高 3x，并在签名与发送前重复核对。' },
+      { kind: '体验优化', text: '小于 10 USD 的单腿差额会提示并跳过，不再阻塞另一腿；杠杆修改后自动刷新检查并要求重新预览。' },
+      { kind: '安全', text: '同一交易账户可跨 pair 共用托管 API Wallet，并通过共享写锁串行化写入；跨交易账户复用仍被禁止。' },
+    ],
+  },
+  {
     date: '2026-11-11',
     title: '调仓过程与结果更清晰',
     description: '补充调仓时的实时价格依据和成交后的滑点信息。',

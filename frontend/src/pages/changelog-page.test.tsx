@@ -12,6 +12,9 @@ import { ChangelogPage } from './changelog-page';
 test('更新日志按日期倒序展示功能、体验和安全改动', () => {
   const html = renderToString(<ChangelogPage />);
   assert.match(html, /更新日志/);
+  assert.match(html, /2026-11-12/);
+  assert.match(html, /Pair 风控与下单前检查/);
+  assert.match(html, /同一交易账户可跨 pair/);
   assert.match(html, /2026-11-11/);
   assert.match(html, /调仓过程与结果更清晰/);
   assert.match(html, /每 5 秒更新两腿盘口/);
@@ -19,6 +22,7 @@ test('更新日志按日期倒序展示功能、体验和安全改动', () => {
   assert.match(html, /新功能/);
   assert.match(html, /体验优化/);
   assert.match(html, /安全/);
+  assert.ok(html.indexOf('2026-11-12') < html.indexOf('2026-11-11'));
   assert.ok(html.indexOf('2026-11-11') < html.indexOf('2026-11-04'));
 });
 
