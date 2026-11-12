@@ -2,7 +2,7 @@
 
 日期：2026-11-11。
 
-状态（2026-11-12 更新）：第一版“监控、候选预览、人工确认”已在当前代码实现，尚未部署或进行真实订单验收；不授权真实交易或自动下单。实现包含 migration `012`、指定腿调仓、连续两次确认、候选预览、300 秒默认冷却及结果回写。空仓不生成新开仓候选。Pair 止盈止损与风险退出另见 [HYPERLIQUID_PAIR_RISK_AUTOMATION.md](HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
+状态（2026-11-12 更新）：第一版“监控、候选预览、人工确认”已在 `8f89e69` 实现并部署，真实订单尚未验收；文档不授权真实交易或自动下单。实现包含 migration `012`、指定腿调仓、连续两次确认、候选预览、300 秒默认冷却及结果回写。空仓不生成新开仓候选。Pair 止盈止损与风险退出另见 [HYPERLIQUID_PAIR_RISK_AUTOMATION.md](HYPERLIQUID_PAIR_RISK_AUTOMATION.md)。
 
 ## 1. 第一版目标与边界
 

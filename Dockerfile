@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -10,7 +12,11 @@ FROM rust:1.94-slim-bookworm AS rust-build
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
-RUN cargo build --release --locked
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    cargo build --release --locked \
+    && cp /build/target/release/hl-trader /tmp/hl-trader
 
 FROM python:3.12-slim-bookworm AS web
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -25,7 +31,7 @@ RUN python -m pip install -r /app/backend/requirements.lock
 COPY backend/ /app/backend/
 COPY tests/fixtures/ /app/tests/fixtures/
 RUN python -m pip install --no-deps /app/backend
-COPY --from=rust-build /build/target/release/hl-trader /usr/local/bin/hl-trader
+COPY --from=rust-build /tmp/hl-trader /usr/local/bin/hl-trader
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin hlapp \
     && install -d -o hlapp -g hlapp /var/lib/hl-trader /var/lib/hl-wallet-keys
 USER 10001

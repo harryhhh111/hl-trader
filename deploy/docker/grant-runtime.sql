@@ -12,3 +12,5 @@ REVOKE INSERT, UPDATE, DELETE ON export_ledger FROM hl_app_runtime;
 REVOKE UPDATE, DELETE ON hyperliquid_api_wallet_events FROM hl_app_runtime;
 REVOKE UPDATE, DELETE ON hyperliquid_pair_risk_events FROM hl_app_runtime;
 REVOKE UPDATE, DELETE ON hyperliquid_rebalance_events FROM hl_app_runtime;
+REVOKE UPDATE, DELETE ON hl_news_sync_event_receipt FROM hl_app_runtime;
+REVOKE UPDATE, DELETE ON hl_news_sync_source_map FROM hl_app_runtime;

@@ -243,10 +243,11 @@ def _bj_day(row: dict) -> date | None:
 # ── 媒体来源状态（并入既有五态语义）─────────────────────────
 
 def _news_source_entries(source_rows, checks, gaps_by_source, enabled,
-                         kinds=("sec", "ir", "media")):
+                         kinds=("sec", "ir", "media"), projections=None):
     """全部来源状态（官方 SEC/IR + 媒体）——官方失败状态也返回，
     区分「没有公告」与「采集失败」。"""
     entries = []
+    projections = projections or {}
     for row in source_rows:
         kind = row["source_kind"]
         if kind not in kinds:
@@ -254,7 +255,7 @@ def _news_source_entries(source_rows, checks, gaps_by_source, enabled,
         check = checks.get(row["source_id"])
         gaps = gaps_by_source.get(row["source_id"], [])
         interval = row["interval_minutes"]
-        if not enabled:
+        if not enabled and row.get("ingest_mode") != "stock_data":
             entries.append(ann._source_entry(
                 kind, state="disabled_global", message="公告采集未启用",
                 row=row, check=check, gaps=gaps, interval=interval))
@@ -283,6 +284,14 @@ def _news_source_entries(source_rows, checks, gaps_by_source, enabled,
             entries.append(ann._source_entry(
                 kind, state=state, message=message, row=row, check=check,
                 gaps=gaps, interval=interval))
+        projection = projections.get(row["source_id"])
+        if projection is not None:
+            entry = entries[-1]
+            entry["open_gaps"] = projection["open_gaps"]
+            entry["earliest_gap_start"] = ann._iso(projection["earliest_gap_start"])
+            if projection["open_gaps"] > 0 and entry["state"] in {"ok", "pending_first_check"}:
+                entry["state"] = "partial"
+                entry["message"] = "上游报告存在未补齐缺口"
     return entries
 
 
@@ -290,7 +299,7 @@ def _load_sources_block():
     """全部来源状态（官方 + 媒体），供 feed/pinned 的状态区。"""
     source_rows = ann._read_rows(
         "SELECT source_id, source_kind, platform, issuer_identifier, "
-        "       interval_minutes, enabled, source_status, status_reason "
+        "       interval_minutes, enabled, source_status, status_reason, ingest_mode "
         "FROM watchlist_announcement_source WHERE market='US'")
     checks = ann._read_rows(
         "SELECT source_id, last_attempt_at, last_attempt_status, "
@@ -305,7 +314,12 @@ def _load_sources_block():
     gaps_by_source: dict[int, list] = {}
     for g in gap_rows:
         gaps_by_source.setdefault(g["source_id"], []).append((g["gap_start"],))
-    return source_rows, checks_by_source, gaps_by_source
+    projections = {
+        row["local_source_id"]: row for row in ann._read_rows(
+            "SELECT local_source_id, open_gaps, earliest_gap_start FROM hl_news_sync_source_state"
+        )
+    }
+    return source_rows, checks_by_source, gaps_by_source, projections
 
 
 # ── feed / pinned ──────────────────────────────────────────
@@ -339,7 +353,7 @@ def feed(date_str: str | None = None, stock: str = "", kind: str = "all") -> dic
         "SELECT s.stock_code FROM watchlist_items w JOIN securities s ON s.id = w.security_id WHERE s.market='US' AND w.enabled=true")}
     try:
         logical = ann._load_logical_announcements()
-        source_rows, checks, gaps_by_source = _load_sources_block()
+        source_rows, checks, gaps_by_source, projections = _load_sources_block()
     except psycopg2.errors.UndefinedTable:
         logger.warning("公告 schema 未安装（watchlist_announcements.sql 未执行）")
         return {**base, "initialized": False, "message": "公告功能尚未初始化",
@@ -367,7 +381,7 @@ def feed(date_str: str | None = None, stock: str = "", kind: str = "all") -> dic
         entries = [entry for entry in entries if stock in entry["stock_codes"]]
     entries = _sort_entries(entries)
 
-    sources = _news_source_entries(source_rows, checks, gaps_by_source, enabled)
+    sources = _news_source_entries(source_rows, checks, gaps_by_source, enabled, projections=projections)
     return {**base, "initialized": True, "entries": entries, "sources": sources}
 
 

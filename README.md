@@ -21,9 +21,11 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 
 ## 独立 Web 应用
 
-原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。阈值再平衡人工版已在当前代码实现，尚未部署或真实验收；全自动止盈止损及 stock_data 资讯同步消费端尚未实现。实际部署版本另行核对。
+原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。阈值再平衡人工版已部署；stock_data 资讯同步消费端已在当前代码实现，但尚未部署或真实联调。全自动止盈止损尚未实现。实际部署版本另行核对。
 
 需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
+
+容器化开发验证提供统一入口：`make test-fast`（Rust、后端离线、前端）、`make test-db`（一次性 PostgreSQL）、`make test-e2e`（固定 Chromium 镜像）和 `make verify`（全部）。E2E 镜像由 `deploy/docker/Dockerfile.e2e` 构建，固定 UTF-8、非 root 用户和当前源码路径；Rust 使用持久 rustup 卷，Docker release 构建使用 BuildKit Cargo 缓存。首次构建需要下载工具和浏览器，后续复用缓存。
 
 ```sh
 python3 -m venv .venv
@@ -222,6 +224,12 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 `hyperliquid_pair_accounts`，每个 pair 至多一个当前地址，缓存按地址隔离；JSON 中已有的
 `account_address` 在首次添加时保留为“默认账户”。公开账户地址与托管 API Wallet 分表保存；托管私钥仅以密文入库。
 
+### 关注股资讯同步
+
+关注股和每日资讯页面只读取本仓库 PostgreSQL。`stock_data` 同步消费端使用专用 HTTPS 只读接口，按不透明 cursor 分页，将事件、收据和 cursor 在同一事务提交；严格 DTO、来源映射、原始 revision、关联和中文增强字段均保留。同步来源固定为 `ingest_mode=stock_data`，不会进入本地直接采集队列，也不会自动新增或启用关注证券。
+
+初始化使用 `python -m hl_app.news_sync bootstrap`，再以 `status` 核对，最后单独执行 `activate`；普通 worker 只从已保存 cursor 继续。`HL_APP_NEWS_SYNC_ENABLED` 默认 false，上游 token 只注入 worker。migration `013_stock_data_news_sync.sql` 提供同步状态、事件收据、来源映射和上游 gap 投影。当前实现尚未真实联调或启用，详见 [同步合同](docs/STOCK_DATA_NEWS_SYNC_CONTRACT.md)。
+
 ### Pair 止盈止损监控与人工平仓
 
 pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损 USD 金额。独立 worker 默认每 30 秒读取最新两腿持仓，以未实现盈亏之和判断阈值；数据缺失、过期或身份不一致时不触发。达到条件后页面显示提醒和“预览并人工平仓”，复用目标为 `0` 的调仓弹窗，由用户重新核对并签名，监控 worker 不持有私钥、不发送订单。规则、触发和人工执行结果持久化，重复检查不会重复生成提醒；worker 停止或状态过期时页面明确提示。
@@ -232,7 +240,7 @@ pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损
 
 pair 详情页可按当前登录用户、pair 和账户设置两腿共同的目标 USD 名义及偏离阈值。worker 默认每 30 秒读取实际两腿名义，任一腿偏离达到阈值且连续两次有效检查后，只把超阈值腿列入候选，并调用只读调仓预览；未超阈值腿保持不动。空仓不会生成新开仓候选，同向持仓、数据缺失或过期不会触发。
 
-页面展示当前偏离、连续确认、触发时预览和冷却状态。用户必须点击“重新预览并人工再平衡”，通过现有托管或浏览器签名链路确认；worker 不读取私钥、不下单。成功后默认冷却 300 秒，拒单、部分成交和未知结果沿用调仓回执；Pair 风险退出触发时取消并暂停再平衡候选。migration `012_threshold_rebalancing.sql` 保存规则、候选和事件。该功能代码与离线测试已完成时仍需单独部署和真实验收，不能视为自动交易。
+页面展示当前偏离、连续确认、触发时预览和冷却状态。用户必须点击“重新预览并人工再平衡”，通过现有托管或浏览器签名链路确认；worker 不读取私钥、不下单。成功后默认冷却 300 秒，拒单、部分成交和未知结果沿用调仓回执；Pair 风险退出触发时取消并暂停再平衡候选。migration `012_threshold_rebalancing.sql` 保存规则、候选和事件。该功能已部署，真实订单仍需单独验收，不能视为自动交易。
 
 ### 单合约杠杆与保证金模式
 

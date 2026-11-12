@@ -54,6 +54,15 @@ def test_full_import_dry_run_apply_and_idempotent_rerun(ready) -> None:
             assert cursor.fetchone()[0] == 1
 
 
+def test_legacy_full_replay_detects_ingest_mode_change(ready) -> None:
+    import_bundle(ready.migration_url, FULL, True)
+    with psycopg2.connect(ready.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE watchlist_announcement_source SET ingest_mode = 'stock_data' WHERE source_id = 1")
+    with pytest.raises(BundleError, match="导入后已有变化"):
+        import_bundle(ready.migration_url, FULL, True)
+
+
 def test_changed_bundle_and_nonempty_target_are_rejected(ready, tmp_path) -> None:
     import_bundle(ready.migration_url, FULL, True)
     changed = clone_bundle(tmp_path)

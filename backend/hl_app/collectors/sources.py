@@ -342,6 +342,7 @@ def registered_sources(url: str) -> list[dict]:
                 """
                 SELECT * FROM watchlist_announcement_source
                 WHERE market = 'US' AND enabled = true AND source_status = 'enabled'
+                  AND ingest_mode = 'direct'
                 ORDER BY source_kind, issuer_identifier, source_id
                 """
             )

@@ -2,13 +2,13 @@
 
 本文只提供部署准备，不执行部署、重启、生产迁移或真实采集。真实地址、数据库、token、研究资料和公开 pair 配置由用户提供，不写入仓库。
 
-状态核对：2026-11-11，依据 `87ffcd8` 的代码和 Compose。原迁移 A–H 已交付；[托管钱包文档](../HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)记录过 2026-11-04 的本机 Docker 部署。本手册描述当前源码提供的操作方式，不证明后续账号注册、盘口和风险 worker 已部署，当前运行状态须另外核对。功能与历史证据范围见[项目状态](../PROJECT_STATUS.md)。
+状态核对：2026-11-12。本手册描述当前源码提供的操作方式；历史部署记录不能证明后续功能已上线，当前运行状态须另外核对。功能与历史证据范围见[项目状态](../PROJECT_STATUS.md)。
 
 ## 1. 组件与权限
 
 - Rust CLI：原交易功能保留；Web 由服务端选择固定的看板、盘口、调仓、签名准备或地址派生命令及参数数组，不接受任意命令、URL、未经校验的账户或秘密路径。
 - 单 FastAPI 进程：持有固定 Web advisory lock，不建表、不启动采集。禁止多 workers、滚动重叠和容器副本。
-- 单 worker：股票采集/增强与 Pair 风险只读监控共用固定生命周期锁；常驻与 `--once` 互斥。股票采集默认关闭，风险监控由独立开关控制，worker 不持有交易私钥。
+- 单 worker：股票采集/增强、Pair 风险、阈值再平衡和资讯同步共用固定生命周期锁；常驻与 `--once` 互斥。各类任务有独立开关，worker 不持有交易私钥；资讯同步 token 与交易凭据分离。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
 Web 使用无 root 的独立 OS 身份，基础 Compose 不挂载签名秘密；浏览器签名模式由客户端持有私钥，Web 只接收订单签名。托管模式挂载加密密钥并接收浏览器加密后的私钥载荷，执行时在内存中解密并经 memfd 传给 Rust，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
@@ -111,11 +111,15 @@ docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.managed
 .venv/bin/python -m hl_app.workers --run
 ```
 
+资讯同步消费端提供 `python -m hl_app.news_sync bootstrap|status|activate`：bootstrap 要求 maintenance 和空同步范围，activate 独立核对完成状态与业务 hash。普通增量由 `HL_APP_NEWS_SYNC_ENABLED=true` 显式启用，仍受 `HL_APP_COLLECTORS_ENABLED` 总开关约束，且要求关闭本地资讯增强。上游 origin 必须为 HTTPS，专用 token 只注入 worker；同步来源不会进入本地直接采集队列。
+
 Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`、`HL_APP_REBALANCE_MONITOR_ENABLED=true`，但只处理网页中显式启用的规则，不执行交易。两类监控默认间隔均为 30 秒，快照最大年龄 30 秒；Web 用 `HL_APP_RISK_MONITOR_STALE_SECONDS=60` 判断监控是否过期。再平衡成功后默认冷却 `HL_APP_REBALANCE_COOLDOWN_SECONDS=300`。只启动 `web gateway` 的部署命令不会启动 worker，需要监控时应使用全服务命令或把 `worker` 加入启动列表。
 
 `deploy/hl-app-web.service.example`、`hl-app-worker.service.example` 和 `nginx.conf.example` 仅为模板，不启用。代理只暴露一个同源站点：`/api/v1` 到后端，其余 SPA fallback 到 dist。
 
 ## 4. 标准验证
+
+仓库根目录可执行 `make test-fast`、`make test-db`、`make test-e2e` 或完整的 `make verify`。E2E 使用 `deploy/docker/Dockerfile.e2e` 固定 UTF-8、非 root 用户、PostgreSQL 和 Chromium；`HL_APP_E2E_PYTHON` 可覆盖 Python 路径。Rust 测试使用持久 `hl-trader-rustup` 卷，生产 Dockerfile 的 Cargo 构建使用 BuildKit 缓存。首次构建仍需下载依赖；缓存、测试镜像或临时数据库不得包含生产凭据。
 
 ```sh
 cargo fmt --check

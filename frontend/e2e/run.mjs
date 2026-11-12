@@ -4,6 +4,7 @@ import path from "node:path";
 import { startStaticServer } from "./server.mjs";
 
 const root = path.resolve("..");
+const python = process.env.HL_APP_E2E_PYTHON ?? path.join(root, ".venv", "bin", "python");
 const pg = fs.mkdtempSync("/tmp/hl-app-e2e-");
 const processes = [];
 let server;
@@ -43,7 +44,7 @@ try {
   run("npm", ["run", "build"], { cwd: path.join(root, "frontend") });
   run("initdb", ["-D", path.join(pg, "data"), "-U", "postgres", "--auth=trust", "--no-instructions"], { stdio: "ignore" });
   run("pg_ctl", ["-D", path.join(pg, "data"), "-l", path.join(pg, "postgres.log"), "-o", `-k ${pg} -p 55440 -c listen_addresses=''`, "start"]);
-  const seed = JSON.parse(run(`${root}/.venv/bin/python`, [path.join(root, "frontend/e2e/seed.py"), pg], { encoding: "utf-8", stdio: ["ignore", "pipe", "inherit"] }));
+  const seed = JSON.parse(run(python, [path.join(root, "frontend/e2e/seed.py"), pg], { encoding: "utf-8", stdio: ["ignore", "pipe", "inherit"] }));
   const env = {
     ...process.env,
     HL_APP_DATABASE_URL: seed.database_url,
@@ -63,7 +64,7 @@ try {
     HL_APP_COLLECTORS_ENABLED: "false",
     HL_APP_SCHEDULER_ENABLED: "false",
   };
-  background(`${root}/.venv/bin/python`, ["-m", "hl_app"], { cwd: root, env });
+  background(python, ["-m", "hl_app"], { cwd: root, env });
   staticServer = await startStaticServer(4173);
   await ready(`http://127.0.0.1:${env.HL_APP_PORT}/api/v1/health`);
   await foreground(path.join(root, "frontend/node_modules/.bin/playwright"), ["test", "-c", path.join(root, "frontend/e2e/playwright.config.mjs"), ...process.argv.slice(2)], { cwd: root, env });

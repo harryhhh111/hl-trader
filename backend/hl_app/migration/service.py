@@ -54,7 +54,7 @@ def _mode(cursor) -> str:
     row = cursor.fetchone()
     if row is None:
         raise BundleError("operation control 未初始化")
-    return row[0]
+    return row["mode"] if isinstance(row, dict) else row[0]
 
 
 def assert_active(url: str) -> None:
@@ -124,7 +124,9 @@ def _require_drained(cursor) -> None:
         raise BundleError("操作要求 maintenance")
     # Caller already holds OPERATION_LOCK_KEY. Never wait here: an in-flight task may need it.
     cursor.execute("SELECT pg_try_advisory_xact_lock(%s)", (BUSINESS_TASK_LOCK_KEY,))
-    if not cursor.fetchone()[0]:
+    row = cursor.fetchone()
+    acquired = next(iter(row.values())) if isinstance(row, dict) else row[0]
+    if not acquired:
         raise BundleError("在途采集或增强任务未排空，拒绝导入或导出")
 
 
@@ -194,6 +196,16 @@ def inspect_bundle(path: Path) -> dict:
     }
 
 
+def _import_business_hash(conn, bundle_rows: dict) -> str:
+    current = _current_rows(conn)
+    entity = "watchlist_announcement_source"
+    if all("ingest_mode" not in row for row in bundle_rows[entity]):
+        for row in current[entity]:
+            if row.get("ingest_mode") == "direct":
+                row.pop("ingest_mode")
+    return business_hash(current)
+
+
 def import_bundle(url: str, path: Path, apply: bool) -> dict:
     inspected = inspect_bundle(path)
     manifest, rows, manifest_hash = read_bundle(path, "full", "stock_data_to_hl")
@@ -218,7 +230,7 @@ def import_bundle(url: str, path: Path, apply: bool) -> dict:
             if existing:
                 if existing[0] != manifest_hash:
                     raise BundleError("同 bundle_id 内容已变化")
-                current_hash = business_hash(_current_rows(conn))
+                current_hash = _import_business_hash(conn, rows)
                 if current_hash != inspected["business_sha256"]:
                     raise BundleError("导入后已有变化，拒绝用旧包覆盖")
                 return {**inspected, "status": "already_imported"}

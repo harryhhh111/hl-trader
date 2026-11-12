@@ -1,6 +1,6 @@
 # 项目功能与验收状态
 
-核对日期：2026-11-12。代码范围：`950e9a4`（Cross / 3x）和 `c79c441`（同账户跨 pair 钱包共享）。本页区分代码、回归和实际部署证据；真实订单仍需独立验收。
+核对日期：2026-11-12。本页区分当前代码、回归和实际部署证据；真实订单仍需独立验收。
 
 ## 已实现的能力
 
@@ -11,17 +11,19 @@
 | 实时盘口和滑点 | 弹窗空闲时每 5 秒读取两腿 BBO；每腿发送前刷新保护价，浏览器价格变化要求重签；结果与历史展示成交滑点和未发送状态 | `8280372` 及 2026-11-12 补充；[盘口与滑点合同](HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md) |
 | 账号注册与登录 | `account` 模式提供邮箱密码注册/登录，Hyperliquid 资源接入用户归属；另保留 token 和 Cloudflare Access 模式 | `0c516bb`；认证异常不回退 token 表单的修复为 `d030122` |
 | 更新日志 | `/changelog` 展示人工维护的发布说明；页面条目不是完整 Git 提交清单 | `cb3cc0e` |
+| 开发验证环境 | 提供 `make test-fast/test-db/test-e2e/verify`；E2E 固定 UTF-8、当前源码和非 root 镜像，Rust 工具链与 Docker Cargo 使用持久缓存 | [运行手册](deployment/INDEPENDENT_APP.md#4-标准验证) |
 | 小额调仓差额处理 | 某腿保护价名义不足 10 USD 时跳过并提示，不再阻止另一腿符合条件的订单 | `9e3ad44` |
 | Pair 止盈止损 | 两腿当前未实现盈亏合计、USD 阈值、只读 worker、页面触发提醒和人工确认平仓；规则与事件按用户、pair 和账户关联 | `87ffcd8`；[风险监控说明](HYPERLIQUID_PAIR_RISK_AUTOMATION.md) |
 | 杠杆与增仓前检查 | 显示并手动调整逐合约 Cross / isolated 和 1–3x；增仓在签名、提交及逐腿发送前重读设置，纯减仓和平仓不被该检查阻塞 | `5b9dbcc`、`950e9a4`；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
-| 阈值再平衡（人工版） | 固定目标、连续两次偏离确认、候选腿只读预览、冷却和人工执行回写；未超阈值腿不动，风险退出优先。当前代码已实现，尚未部署或真实验收 | [阈值再平衡合同](HYPERLIQUID_THRESHOLD_REBALANCING.md)；migration `012` |
+| 阈值再平衡（人工版） | 固定目标、连续两次偏离确认、候选腿只读预览、冷却和人工执行回写；未超阈值腿不动，风险退出优先。已部署，真实订单仍需验收 | `8f89e69`；[阈值再平衡合同](HYPERLIQUID_THRESHOLD_REBALANCING.md)；migration `012` |
+| stock_data 资讯同步消费端 | 严格 DTO、来源映射、事件收据、页事务、bootstrap/status/activate 与 worker 已在当前代码实现；同步来源不进入本地直接采集。尚未部署或真实联调 | [同步合同](STOCK_DATA_NEWS_SYNC_CONTRACT.md)；migration `013` |
 
-当前有序数据库迁移为 `001`–`012`。新增代码或迁移文件不代表运行环境已经应用；执行迁移、重建容器和变更真实交易配置仍需明确授权。
+当前有序数据库迁移为 `001`–`013`。新增代码或迁移文件不代表运行环境已经应用；执行迁移、重建容器和变更真实交易配置仍需明确授权。
 
 ## 尚未实现或仍需外部验收
 
 - **全自动止盈止损**：当前 worker 只读监控，不签名、不下单。触发后由用户重新预览并人工确认；盈亏不含历史已实现盈亏、资金费和手续费。
-- **stock_data 资讯同步消费端**：[开发合同](STOCK_DATA_NEWS_SYNC_CONTRACT.md)已定义“空资讯范围 bootstrap + 增量事件”，本仓库消费端和真实联调尚未完成。该链路不依赖历史 full 包或 full lineage。
+- **stock_data 真实联调与启用**：消费端代码和离线 fixture 已实现，但源侧发布、`allowed_domain`、HTTPS、专用 token、生产 bootstrap 和激活仍未验收。该链路不依赖历史 full 包或 full lineage。
 - **真实交易及新功能部署验收**：需要核对实际镜像、数据库迁移、worker、配置和订单证据；源码存在、mock 测试或历史部署记录均不能替代。
 
 ## 验证与部署证据的适用范围

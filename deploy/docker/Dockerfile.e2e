@@ -1,0 +1,33 @@
+FROM node:22-bookworm AS node
+
+FROM python:3.12-bookworm
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
+    HL_APP_E2E_PYTHON=/opt/hl-venv/bin/python \
+    PATH=/usr/lib/postgresql/15/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+COPY --from=node /usr/local/ /usr/local/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git postgresql \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/hl-venv
+COPY backend/requirements.lock /tmp/requirements.lock
+RUN /opt/hl-venv/bin/python -m pip install -r /tmp/requirements.lock
+
+WORKDIR /opt/hl-frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci && npx playwright install --with-deps chromium
+
+RUN useradd --uid 10000 --create-home tester
+COPY deploy/docker/e2e-entrypoint.sh /usr/local/bin/hl-e2e-entrypoint
+RUN chmod 0755 /usr/local/bin/hl-e2e-entrypoint
+
+USER tester
+WORKDIR /work/frontend
+ENTRYPOINT ["hl-e2e-entrypoint"]
