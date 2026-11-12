@@ -18,6 +18,7 @@ const STATUS_LABEL: Record<HlTradeHistoryStatus, string> = {
 const LEG_STATUS_LABEL: Record<string, string> = {
   not_required: '无需交易',
   prepared: '待签名',
+  not_sent: '未发送',
   pending: '待交易所确认',
   filled: '全部成交',
   partially_filled: '部分成交',
@@ -96,7 +97,8 @@ export function TradeHistory({ pairId, accountAddress }: {
                     <td className="pr-4 font-mono">{leg.action === 'none' ? '—' : leg.confirmed_qty}</td>
                     <td className="pr-4 font-mono">{dash(leg.avg_px)}</td>
                     <td className="pr-4 font-mono text-xs">{slippageLabel(leg.slippage_pct, leg.slippage_usd)}</td>
-                    <td className="pr-4">{LEG_STATUS_LABEL[leg.status] ?? leg.status}</td>
+                    <td className="pr-4">{['incomplete', 'unknown'].includes(item.status) && leg.status === 'prepared'
+                      ? '未发送' : LEG_STATUS_LABEL[leg.status] ?? leg.status}</td>
                     <td className="font-mono">{leg.oid ?? '—'}</td>
                   </tr>
                 ))}</tbody>

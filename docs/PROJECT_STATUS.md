@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 独立 Web 应用 | React、FastAPI、PostgreSQL；Hyperliquid 看板、关注股、资讯、AI 草稿；原迁移 A–H 已交付 | [迁移执行记录](migration/PROGRESS.md)、[历史验收证据](migration/ACCEPTANCE.md) |
 | 目标仓位调整与托管钱包 | 公开地址切换、浏览器本地/扩展钱包签名、托管 API Wallet、交易历史；托管路径包含授权核对、challenge、钱包版本、请求幂等及 memfd 传钥；同账户可跨 pair 共享钱包并串行化写入 | `17f530f`、`c79c441`；[托管钱包说明](HYPERLIQUID_MANAGED_API_WALLET_PLAN.md) |
-| 实时盘口和滑点 | 弹窗空闲时每 5 秒读取两腿 BBO；价格变化要求重新预览；结果与历史展示成交滑点 | `8280372`；[盘口与滑点合同](HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md) |
+| 实时盘口和滑点 | 弹窗空闲时每 5 秒读取两腿 BBO；每腿发送前刷新保护价，浏览器价格变化要求重签；结果与历史展示成交滑点和未发送状态 | `8280372` 及 2026-11-12 补充；[盘口与滑点合同](HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md) |
 | 账号注册与登录 | `account` 模式提供邮箱密码注册/登录，Hyperliquid 资源接入用户归属；另保留 token 和 Cloudflare Access 模式 | `0c516bb`；认证异常不回退 token 表单的修复为 `d030122` |
 | 更新日志 | `/changelog` 展示人工维护的发布说明；页面条目不是完整 Git 提交清单 | `cb3cc0e` |
 | 小额调仓差额处理 | 某腿保护价名义不足 10 USD 时跳过并提示，不再阻止另一腿符合条件的订单 | `9e3ad44` |

@@ -306,7 +306,7 @@ export interface HlPairRisk {
 }
 
 export type HlAdjustmentStatus = 'preview' | 'prepared' | 'succeeded' | 'incomplete' | 'unknown';
-export type HlAdjustmentLegStatus = 'not_required' | 'prepared' | 'pending' | 'filled' | 'partially_filled' | 'rejected' | 'unknown';
+export type HlAdjustmentLegStatus = 'not_required' | 'prepared' | 'not_sent' | 'pending' | 'filled' | 'partially_filled' | 'rejected' | 'unknown';
 
 export interface HlAdjustmentLeg {
   coin: string;

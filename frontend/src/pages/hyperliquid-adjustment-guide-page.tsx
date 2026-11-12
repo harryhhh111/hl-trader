@@ -78,7 +78,7 @@ export function HyperliquidAdjustmentGuidePage() {
           <CardHeader><CardTitle className="text-base">订单怎样成交</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>每腿每次动作至多发送一笔 IOC 限价单：可立即成交的部分成交，未成交部分由交易所取消，不会长期挂在盘口。</p>
-            <p>保护价用于限制可接受的成交价格，不代表保证成交价或保证全部成交。减仓先于增仓，减仓单使用 reduce-only，避免反向开仓。</p>
+            <p>保护价用于限制可接受的成交价格，不代表保证成交价或保证全部成交。每腿发送前会刷新盘口：托管模式使用最新保护价；浏览器模式若保护价变化则不发送旧签名订单，需重新预览并签名。减仓先于增仓，减仓单使用 reduce-only，避免反向开仓。</p>
             <p>数量按市场精度向下取整，所以最终名义可能略低于输入目标。最低下单差额按 10 USD 检查，每腿目标硬上限默认为 15000 USD。</p>
             <p>两腿不是原子交易。拒单或部分成交后停止后续写操作，不自动追单，也不自动反向补偿。</p>
           </CardContent>

@@ -103,6 +103,20 @@ def test_history_maps_running_and_applies_limit(tmp_path) -> None:
     assert result["has_more"] is True
 
 
+def test_history_accepts_not_sent_legs(tmp_path) -> None:
+    directory = tmp_path / "nbis-crwv" / ACCOUNT
+    action_id = "adjust-0x" + "f" * 32
+    value = report(action_id, "2026-11-12T07:02:25Z", status="incomplete")
+    value["legs"][0].update(status="rejected", confirmed_qty="0", avg_px=None, oid=None, result="IOC 拒绝")
+    value["legs"][1].update(status="not_sent", confirmed_qty="0", avg_px=None, oid=None, result="本次执行已停止，订单未发送")
+    write_report(directory, action_id, value, current=True)
+
+    result = history.read_history(str(tmp_path), DESCRIPTOR, ACCOUNT)
+
+    assert result["skipped_reports"] == 0
+    assert [leg["status"] for leg in result["items"][0]["legs"]] == ["rejected", "not_sent"]
+
+
 def test_missing_history_directory_is_empty(tmp_path) -> None:
     result = history.read_history(str(tmp_path), DESCRIPTOR, ACCOUNT)
     assert result == {

@@ -44,6 +44,7 @@ pub enum AdjustmentStatus {
 pub enum AdjustmentLegStatus {
     NotRequired,
     Prepared,
+    NotSent,
     Pending,
     Filled,
     PartiallyFilled,
@@ -519,7 +520,17 @@ fn ensure_config_unchanged(request: &AdjustRequest<'_>) -> Result<(), AdjustErro
     Ok(())
 }
 
+fn mark_unsent(report: &mut AdjustmentReport) {
+    for leg in &mut report.legs {
+        if leg.status == AdjustmentLegStatus::Prepared {
+            leg.status = AdjustmentLegStatus::NotSent;
+            leg.result = Some("本次执行已停止，订单未发送".into());
+        }
+    }
+}
+
 fn finish_known(report: &mut AdjustmentReport, detail: String) {
+    mark_unsent(report);
     report.status = AdjustmentStatus::Incomplete;
     report.diagnostics.push(detail);
     report
@@ -528,11 +539,33 @@ fn finish_known(report: &mut AdjustmentReport, detail: String) {
 }
 
 fn finish_unknown(report: &mut AdjustmentReport, detail: String) {
+    mark_unsent(report);
     report.status = AdjustmentStatus::Unknown;
     report.diagnostics.push(detail);
     report
         .diagnostics
         .push("结果未知，禁止直接重试；请先按 cloid、成交记录和实际持仓人工核对".into());
+}
+
+async fn latest_protect_price(
+    adapter: &Adapter,
+    market: &PerpMarket,
+    leg: &AdjustmentLeg,
+) -> Result<Decimal, AdjustError> {
+    let book = adapter.bbo(&market.name).await?;
+    mid(&book, &market.name)?;
+    pair::protect_price(market, leg.action == "buy", &book)
+        .map_err(|error| AdjustError::Refused(error.to_string()))
+}
+
+fn stop_before_send(
+    store: &AdjustStore,
+    mut report: AdjustmentReport,
+    detail: String,
+) -> Result<AdjustmentReport, AdjustError> {
+    finish_known(&mut report, detail);
+    save_after_write(store, &report)?;
+    Ok(report)
 }
 
 fn save_after_write(store: &AdjustStore, report: &AdjustmentReport) -> Result<(), AdjustError> {
@@ -624,6 +657,35 @@ pub async fn run_adjust(
             finish_known(&mut report, error.to_string());
             save_after_write(&store, &report)?;
             return Ok(report);
+        }
+        let latest =
+            match latest_protect_price(adapter, &plan.markets[index], &report.legs[index]).await {
+                Ok(price) => price,
+                Err(error) => {
+                    return stop_before_send(
+                        &store,
+                        report,
+                        format!("{} 发送前刷新盘口失败: {error}", plan.markets[index].name),
+                    );
+                }
+            };
+        if report.legs[index].order_qty * latest < Decimal::TEN {
+            return stop_before_send(
+                &store,
+                report,
+                format!(
+                    "{} 按发送前最新保护价 {latest} 计算低于最小下单名义 10 USD，订单未发送",
+                    plan.markets[index].name
+                ),
+            );
+        }
+        let previous = report.legs[index].protect_px;
+        if latest != previous {
+            report.legs[index].protect_px = latest;
+            report.diagnostics.push(format!(
+                "{} 发送前保护价已由 {previous} 刷新为 {latest}",
+                plan.markets[index].name
+            ));
         }
         report.status = AdjustmentStatus::Executing;
         report.legs[index].status = AdjustmentLegStatus::Pending;
@@ -1092,6 +1154,28 @@ pub async fn submit_browser_adjustment(
             save_after_write(&store, &report)?;
             return Ok(report);
         }
+        let latest = match latest_protect_price(adapter, &markets[index], &report.legs[index]).await
+        {
+            Ok(price) => price,
+            Err(error) => {
+                return stop_before_send(
+                    &store,
+                    report,
+                    format!("{} 发送前刷新盘口失败: {error}", markets[index].name),
+                );
+            }
+        };
+        let signed_price = report.legs[index].protect_px;
+        if latest != signed_price {
+            return stop_before_send(
+                &store,
+                report,
+                format!(
+                    "{} 的已签名保护价 {signed_price} 与发送前最新保护价 {latest} 不同，订单未发送；请重新预览并签名",
+                    markets[index].name
+                ),
+            );
+        }
         report.status = AdjustmentStatus::Executing;
         report.legs[index].status = AdjustmentLegStatus::Pending;
         store.save(&report)?;
@@ -1200,12 +1284,14 @@ pub async fn submit_browser_adjustment(
 mod tests {
     use super::*;
     use httpmock::MockServer;
+    use std::collections::{HashMap, VecDeque};
     use std::str::FromStr;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
     const USER: &str = "0x7f2120f612b78d579197762196b8a202ab654096";
+    type BookQueues = Arc<Mutex<HashMap<String, VecDeque<(String, String)>>>>;
 
     struct Fixture {
         config: config::DashboardConfig,
@@ -1215,6 +1301,7 @@ mod tests {
         leverage: Arc<AtomicUsize>,
         margin_mode: Arc<Mutex<String>>,
         settings_reads: Arc<AtomicUsize>,
+        books: BookQueues,
     }
 
     impl Fixture {
@@ -1282,7 +1369,7 @@ mod tests {
         });
     }
 
-    fn mock_markets(server: &MockServer, margin_mode: Option<&str>) {
+    fn mock_markets(server: &MockServer, margin_mode: Option<&str>) -> BookQueues {
         server.mock(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/info")
@@ -1314,18 +1401,42 @@ mod tests {
                 }))), "collateralToken": 0
             }));
         });
-        for (coin, bid, ask) in [("xyz:NBIS", "9.9", "10.1"), ("xyz:CRWV", "49.75", "50.25")] {
+        let books: BookQueues = Arc::new(Mutex::new(HashMap::from([
+            (
+                "xyz:NBIS".into(),
+                VecDeque::from([("9.9".into(), "10.1".into())]),
+            ),
+            (
+                "xyz:CRWV".into(),
+                VecDeque::from([("49.75".into(), "50.25".into())]),
+            ),
+        ])));
+        for coin in ["xyz:NBIS", "xyz:CRWV"] {
+            let books = books.clone();
             server.mock(|when, then| {
                 when.method(httpmock::Method::POST)
                     .path("/info")
                     .body_includes(r#""type":"l2Book""#)
                     .body_includes(coin);
-                then.status(200).body(format!(
-                    r#"{{"coin":"{coin}","time":1760000000000,"snapshot":true,
-                        "levels":[[{{"px":"{bid}","sz":"1000","n":1}}],[{{"px":"{ask}","sz":"1000","n":1}}]]}}"#
-                ));
+                then.respond_with(move |_| {
+                    let mut all = books.lock().unwrap();
+                    let queue = all.get_mut(coin).unwrap();
+                    let (bid, ask) = if queue.len() > 1 {
+                        queue.pop_front().unwrap()
+                    } else {
+                        queue.front().unwrap().clone()
+                    };
+                    httpmock::HttpMockResponse::builder()
+                        .status(200)
+                        .body(format!(
+                            r#"{{"coin":"{coin}","time":1760000000000,"snapshot":true,
+                                "levels":[[{{"px":"{bid}","sz":"1000","n":1}}],[{{"px":"{ask}","sz":"1000","n":1}}]]}}"#
+                        ))
+                        .build()
+                });
             });
         }
+        books
     }
 
     async fn setup(accounts: Vec<String>) -> (MockServer, Fixture) {
@@ -1337,7 +1448,7 @@ mod tests {
         margin_mode: Option<&str>,
     ) -> (MockServer, Fixture) {
         let server = MockServer::start_async().await;
-        mock_markets(&server, margin_mode);
+        let books = mock_markets(&server, margin_mode);
         mock_accounts(&server, accounts);
         let leverage = Arc::new(AtomicUsize::new(3));
         let margin_mode = Arc::new(Mutex::new("cross".to_string()));
@@ -1387,6 +1498,7 @@ mod tests {
                 leverage,
                 margin_mode,
                 settings_reads,
+                books,
             },
         )
     }
@@ -1700,12 +1812,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.status, AdjustmentStatus::Incomplete);
+        assert_eq!(report.legs[0].status, AdjustmentLegStatus::Rejected);
+        assert_eq!(report.legs[1].status, AdjustmentLegStatus::NotSent);
+        assert_eq!(
+            report.legs[1].result.as_deref(),
+            Some("本次执行已停止，订单未发送")
+        );
         assert_eq!(first.calls(), 1);
         assert_eq!(second.calls(), 0);
         let preview = run_adjust(&adapter, None, &fixture.request(), false)
             .await
             .unwrap();
         assert_eq!(preview.status, AdjustmentStatus::Preview);
+    }
+
+    #[tokio::test]
+    async fn managed_execution_refreshes_each_protect_price_before_signing() {
+        let (server, fixture) = setup(vec![account("0", "0"), account("200", "-40")]).await;
+        {
+            let mut books = fixture.books.lock().unwrap();
+            books
+                .get_mut("xyz:NBIS")
+                .unwrap()
+                .push_back(("10".into(), "10.2".into()));
+            books
+                .get_mut("xyz:CRWV")
+                .unwrap()
+                .push_back(("49.85".into(), "50.35".into()));
+        }
+        let first = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#)
+                .body_includes(r#""p":"10.202""#);
+            then.status(200).body(filled(11, "200", "10.2"));
+        });
+        let second = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#)
+                .body_includes(r#""p":"49.848""#);
+            then.status(200).body(filled(12, "40", "49.85"));
+        });
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &fixture.request(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.status, AdjustmentStatus::Succeeded, "{report:?}");
+        assert_eq!(report.legs[0].mid_px, Decimal::TEN);
+        assert_eq!(report.legs[0].protect_px, Decimal::new(10202, 3));
+        assert_eq!(report.legs[1].protect_px, Decimal::new(49848, 3));
+        assert_eq!(first.calls(), 1);
+        assert_eq!(second.calls(), 1);
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("10.102") && line.contains("10.202"))
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("49.748") && line.contains("49.848"))
+        );
     }
 
     #[tokio::test]
@@ -1921,6 +2096,53 @@ mod tests {
         assert_eq!(report.legs[1].status, AdjustmentLegStatus::Filled);
         assert_eq!(skipped.calls(), 0);
         assert_eq!(executed.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn browser_price_change_requires_new_signatures_without_exchange() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let exchange = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/exchange");
+            then.status(500);
+        });
+        let adapter = Adapter::with_base_url(&server.base_url());
+        let api_wallet = test_wallet();
+        let prepared =
+            prepare_browser_adjustment(&adapter, &fixture.request(), api_wallet.address())
+                .await
+                .unwrap();
+        {
+            let mut books = fixture.books.lock().unwrap();
+            let queue = books.get_mut("xyz:NBIS").unwrap();
+            queue.clear();
+            queue.push_back(("10".into(), "10.2".into()));
+        }
+
+        let report = submit_browser_adjustment(
+            &adapter,
+            &fixture.request(),
+            api_wallet.address(),
+            prepared.action_id.as_deref().unwrap(),
+            sign_browser_requests(&prepared, &api_wallet),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.status, AdjustmentStatus::Incomplete, "{report:?}");
+        assert!(
+            report
+                .legs
+                .iter()
+                .all(|leg| leg.status == AdjustmentLegStatus::NotSent)
+        );
+        assert_eq!(report.legs[0].protect_px, Decimal::new(10102, 3));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|line| line.contains("请重新预览并签名"))
+        );
+        assert_eq!(exchange.calls(), 0);
     }
 
     #[tokio::test]

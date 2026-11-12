@@ -15,6 +15,8 @@ test('更新日志按日期倒序展示功能、体验和安全改动', () => {
   assert.match(html, /2026-11-12/);
   assert.match(html, /Pair 风控与下单前检查/);
   assert.match(html, /同一交易账户可跨 pair/);
+  assert.match(html, /每腿发送前刷新盘口/);
+  assert.match(html, /未执行的腿明确显示“未发送”/);
   assert.match(html, /2026-11-11/);
   assert.match(html, /调仓过程与结果更清晰/);
   assert.match(html, /每 5 秒更新两腿盘口/);

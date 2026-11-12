@@ -15,7 +15,7 @@ ARCHIVE_RE = re.compile(
 REVISION_RE = re.compile(r"^[0-9a-f]{64}$")
 REPORT_STATUSES = {"executing", "succeeded", "incomplete", "unknown"}
 LEG_STATUSES = {
-    "not_required", "prepared", "pending", "filled", "partially_filled", "rejected", "unknown",
+    "not_required", "prepared", "not_sent", "pending", "filled", "partially_filled", "rejected", "unknown",
 }
 MAX_REPORT_BYTES = 1024 * 1024
 DEFAULT_LIMIT = 50

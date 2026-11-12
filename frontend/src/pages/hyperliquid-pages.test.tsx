@@ -261,6 +261,42 @@ test('交易历史位于详情页底部并展示两腿成交与订单 ID', () =>
   qc.clear();
 });
 
+test('交易历史将未完成动作中的未发送腿显示为未发送', () => {
+  const value = snapshot(nbisFixture);
+  const qc = seed(value);
+  qc.setQueryData(['hl-trade-history', value.pair.id, value.pair.account_address], {
+    pair_id: value.pair.id,
+    account_address: value.pair.account_address,
+    items: [{
+      action_id: `adjust-0x${'b'.repeat(32)}`,
+      request_id: '4d37d2a5-1da5-47a1-a2ce-b17365ea566f',
+      execution_mode: 'managed',
+      status: 'incomplete',
+      target_notional: '2000',
+      created_at: '2026-11-12T07:02:25Z',
+      legs: [{
+        coin: 'xyz:NBIS', position_side: 'long', action: 'buy', reduce_only: false,
+        order_qty: '13.34', protect_px: '149.94', status: 'rejected', confirmed_qty: '0',
+        avg_px: null, oid: null, cloid: null, result: 'IOC 零成交',
+      }, {
+        coin: 'xyz:CRWV', position_side: 'short', action: 'sell', reduce_only: false,
+        order_qty: '35.22', protect_px: '56.765', status: 'prepared', confirmed_qty: '0',
+        avg_px: null, oid: null, cloid: null, result: null,
+      }],
+      diagnostics: [],
+    }],
+    has_more: false,
+    skipped_reports: 0,
+  });
+
+  const html = renderDetail(qc, value.pair.id);
+
+  assert.match(html, /已拒绝/);
+  assert.match(html, /未发送/);
+  assert.doesNotMatch(html, /待签名/);
+  qc.clear();
+});
+
 test('调仓使用说明子页面包含操作步骤、差额示例和异常处理', () => {
   const html = renderToString(
     <MemoryRouter initialEntries={['/hyperliquid/adjustment-guide']}>
