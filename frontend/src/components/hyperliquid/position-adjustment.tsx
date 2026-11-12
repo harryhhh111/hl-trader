@@ -25,11 +25,12 @@ const actionLabel = (action: string, reduceOnly: boolean) => {
   return `${action === 'buy' ? '买入' : '卖出'}${reduceOnly ? '（只减仓）' : '（增仓）'}`;
 };
 
-export function PositionAdjustment({ descriptor, configRevision, initialTarget = '2000', buttonLabel = '调整仓位' }: {
+export function PositionAdjustment({ descriptor, configRevision, initialTarget = '2000', buttonLabel = '调整仓位', legIndices }: {
   descriptor: HlPairDescriptor;
   configRevision: string;
   initialTarget?: string;
   buttonLabel?: string;
+  legIndices?: number[];
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -58,6 +59,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     target_notional: target.trim(),
     account_address: account ?? '',
     config_revision: configRevision,
+    ...(legIndices == null ? {} : { leg_indices: legIndices }),
   };
   const clearLocalWallet = () => {
     setLocalWallet(null);
@@ -164,7 +166,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     preview.reset();
     browser.reset();
     managed.reset();
-  }, [descriptor.id, account, configRevision, initialTarget]);
+  }, [descriptor.id, account, configRevision, initialTarget, legIndices]);
 
   const activeRequest = managedWallet.data?.active_execution;
   useEffect(() => {
@@ -283,12 +285,13 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
           if (!busy || nextOpen) setOpen(nextOpen);
           if (!nextOpen) clearLocalWallet();
         }}
-        title="调整两腿仓位"
+        title={legIndices == null ? '调整两腿仓位' : '调整指定腿仓位'}
         className="max-w-4xl"
       >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             目标为每腿绝对名义（USD）；默认方向 {descriptor.coins[0]} 多 / {descriptor.coins[1]} 空。先计算差额，再选择托管或浏览器 API Wallet 签名。
+            {legIndices != null && <span className="text-amber-700">本次仅调整 {legIndices.map((index) => descriptor.coins[index]).join('、')}，另一腿保持不动。</span>}
             {' '}<Link className="text-primary underline underline-offset-4" to="/hyperliquid/adjustment-guide">查看使用说明</Link>
           </p>
           <div className="flex flex-wrap items-center gap-2" aria-label="签名方式">

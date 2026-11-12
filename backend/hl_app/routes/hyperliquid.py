@@ -15,6 +15,7 @@ from ..services import hyperliquid_preflight as preflight_service
 from ..services import hyperliquid_pairs as pairs_service
 from ..services import hyperliquid_quotes as quotes_service
 from ..services import hyperliquid_risk as risk_service
+from ..services import hyperliquid_rebalance as rebalance_service
 from ..services import hyperliquid_managed_adjustments as managed_adjustments_service
 from ..services import hyperliquid_wallets as wallets_service
 from ..services import hyperliquid_wallet_authorization as wallet_authorization
@@ -40,6 +41,7 @@ class AdjustmentPreview(BaseModel):
     target_notional: str = Field(min_length=1, max_length=40)
     account_address: str = Field(min_length=42, max_length=42)
     config_revision: str = Field(min_length=64, max_length=64)
+    leg_indices: list[int] | None = Field(default=None, max_length=2)
 
     model_config = {"extra": "forbid"}
 
@@ -92,6 +94,16 @@ class RiskRuleSave(BaseModel):
     enabled: bool
     take_profit_usd: str | None = Field(default=None, max_length=40)
     stop_loss_usd: str | None = Field(default=None, max_length=40)
+
+    model_config = {"extra": "forbid"}
+
+
+class RebalanceRuleSave(BaseModel):
+    account_address: str = Field(min_length=42, max_length=42)
+    config_revision: str = Field(min_length=64, max_length=64)
+    enabled: bool
+    target_notional: str = Field(min_length=1, max_length=40)
+    threshold_pct: str = Field(min_length=1, max_length=40)
 
     model_config = {"extra": "forbid"}
 
@@ -303,6 +315,46 @@ def save_pair_risk(pair_id: str, body: RiskRuleSave, request: Request) -> dict:
         raise _risk_error(exc) from exc
 
 
+def _rebalance_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, (rebalance_service.RebalanceError, adjustments_service.AdjustmentError, accounts_service.PairAccountError)):
+        return HTTPException(exc.status_code, exc.detail)
+    if isinstance(exc, pairs_service.PairsConfigError):
+        return _config_error(exc)
+    logger.exception("hyperliquid rebalance operation failed")
+    return HTTPException(503, "阈值再平衡暂不可用")
+
+
+def _record_rebalance_result(request: Request, pair_id: str, account_address: str, report: dict) -> None:
+    try:
+        rebalance_service.record_execution_result(
+            request.app.state.settings.database_url, pair_id, account_address, _owner(request), report,
+        )
+    except Exception:
+        logger.exception("rebalance execution result could not be recorded")
+
+
+@router.get("/hyperliquid/pairs/{pair_id}/rebalance")
+def get_pair_rebalance(pair_id: str, account_address: str, request: Request) -> dict:
+    try:
+        return {"data": rebalance_service.get_rule(
+            request.app.state.settings.database_url, pair_id, account_address, _owner(request),
+        )}
+    except Exception as exc:
+        raise _rebalance_error(exc) from exc
+
+
+@router.put("/hyperliquid/pairs/{pair_id}/rebalance")
+def save_pair_rebalance(pair_id: str, body: RebalanceRuleSave, request: Request) -> dict:
+    try:
+        return {"data": rebalance_service.save_rule(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.enabled, body.target_notional, body.threshold_pct,
+            _owner(request),
+        )}
+    except Exception as exc:
+        raise _rebalance_error(exc) from exc
+
+
 @router.get("/hyperliquid/pairs/{pair_id}/adjustment-preflight")
 def adjustment_preflight(pair_id: str, account_address: str, config_revision: str, request: Request) -> dict:
     try:
@@ -378,7 +430,7 @@ def preview_pair_adjustment(pair_id: str, body: AdjustmentPreview, request: Requ
             body.account_address,
             body.config_revision,
             body.target_notional,
-            _owner(request),
+            _owner(request), body.leg_indices,
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -396,7 +448,7 @@ def preview_managed_adjustment(pair_id: str, body: ManagedAdjustmentPreview, req
         return {"data": managed_adjustments_service.preview_managed(
             request.app.state.settings.database_url, pair_id, body.account_address,
             body.config_revision, body.target_notional, body.request_id,
-            body.wallet_version, request.state.session,
+            body.wallet_version, request.state.session, body.leg_indices,
         )}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -410,9 +462,10 @@ def execute_managed_adjustment(pair_id: str, body: ManagedAdjustmentExecute, req
         result, status = managed_adjustments_service.execute_managed(
             request.app.state.settings.database_url, pair_id, body.account_address,
             body.config_revision, body.target_notional, body.confirmation,
-            body.request_id, body.wallet_version, request.state.session,
+            body.request_id, body.wallet_version, request.state.session, body.leg_indices,
         )
         _record_risk_result(request, pair_id, body.account_address, result)
+        _record_rebalance_result(request, pair_id, body.account_address, result)
         return JSONResponse({"data": result}, status_code=status)
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -427,6 +480,7 @@ def get_managed_adjustment(pair_id: str, request_id: str, request: Request) -> d
             request.app.state.settings.database_url, pair_id, request_id, _owner(request)
         )
         _record_risk_result(request, pair_id, result["account_address"], result)
+        _record_rebalance_result(request, pair_id, result["account_address"], result)
         return {"data": result}
     except Exception as exc:
         raise _wallet_error(exc) from exc
@@ -442,7 +496,7 @@ def prepare_browser_adjustment(pair_id: str, body: BrowserAdjustmentPrepare, req
             body.config_revision,
             body.target_notional,
             body.expected_signer,
-            _owner(request),
+            _owner(request), body.leg_indices,
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -466,9 +520,10 @@ def submit_browser_adjustment(pair_id: str, body: BrowserAdjustmentSubmit, reque
             body.expected_signer,
             body.action_id,
             [item.model_dump() for item in body.signatures],
-            _owner(request),
+            _owner(request), body.leg_indices,
         )
         _record_risk_result(request, pair_id, body.account_address, report)
+        _record_rebalance_result(request, pair_id, body.account_address, report)
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -489,9 +544,10 @@ def execute_pair_adjustment(pair_id: str, body: AdjustmentExecute, request: Requ
             body.config_revision,
             body.target_notional,
             body.confirmation,
-            _owner(request),
+            _owner(request), body.leg_indices,
         )
         _record_risk_result(request, pair_id, body.account_address, report)
+        _record_rebalance_result(request, pair_id, body.account_address, report)
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc

@@ -42,7 +42,7 @@ class PostgresNamespace:
                             sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)
                         )
                     )
-                for table in ("hyperliquid_api_wallet_events", "hyperliquid_pair_risk_events"):
+                for table in ("hyperliquid_api_wallet_events", "hyperliquid_pair_risk_events", "hyperliquid_rebalance_events"):
                     cursor.execute(
                         sql.SQL("REVOKE UPDATE, DELETE ON {}.{} FROM {}").format(
                             sql.Identifier(self.schema), sql.Identifier(table), sql.Identifier(self.role)

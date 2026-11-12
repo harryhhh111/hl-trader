@@ -305,6 +305,56 @@ export interface HlPairRisk {
   events: HlPairRiskEvent[];
 }
 
+export type HlRebalanceStatus = 'disabled' | 'monitoring' | 'candidate' | 'executing' | 'cooling' | 'incomplete' | 'unknown' | 'unavailable';
+
+export interface HlPairRebalanceEvent {
+  id: number;
+  event_type: 'rule_updated' | 'candidate' | 'candidate_cleared' | 'execution_updated';
+  leg_indices: number[];
+  snapshot: {
+    current_notionals: string[];
+    drift_pct: string[];
+    open_orders: number;
+    position_state: HlPositionState;
+    checked_at: string;
+  } | null;
+  action_id: string | null;
+  request_id: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface HlPairRebalance {
+  configured: boolean;
+  pair_id: string;
+  account_address: string;
+  network?: 'mainnet' | 'testnet';
+  pair_config_revision?: string;
+  enabled: boolean;
+  target_notional: string | null;
+  threshold_pct: string | null;
+  rule_revision: number;
+  status: HlRebalanceStatus;
+  worker_available: boolean;
+  last_attempt_at: string | null;
+  last_checked_at: string | null;
+  consecutive_count: number;
+  current_notionals: string[] | null;
+  drift_pct: string[] | null;
+  open_orders: number | null;
+  position_state: HlPositionState | null;
+  candidate_leg_indices: number[];
+  candidate_preview: HlAdjustmentReport | null;
+  candidate_at: string | null;
+  cooldown_until: string | null;
+  last_action_id: string | null;
+  last_request_id: string | null;
+  last_error: string | null;
+  risk_blocked: boolean;
+  updated_at?: string;
+  events: HlPairRebalanceEvent[];
+}
+
 export type HlAdjustmentStatus = 'preview' | 'prepared' | 'succeeded' | 'incomplete' | 'unknown';
 export type HlAdjustmentLegStatus = 'not_required' | 'prepared' | 'not_sent' | 'pending' | 'filled' | 'partially_filled' | 'rejected' | 'unknown';
 
@@ -349,6 +399,7 @@ export interface HlAdjustmentReport {
   config_revision: string;
   account_address: string;
   target_notional: string;
+  leg_indices?: number[];
   created_at: string;
   legs: HlAdjustmentLeg[];
   diagnostics: string[];

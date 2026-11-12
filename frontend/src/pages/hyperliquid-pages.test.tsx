@@ -220,6 +220,52 @@ test('Pair 止盈止损展示整体阈值、触发提醒和人工平仓入口', 
   qc.clear();
 });
 
+test('阈值再平衡展示连续确认、候选腿预览和人工执行入口', () => {
+  const value = snapshot(nbisFixture);
+  const qc = seed(value);
+  const account = value.pair.account_address;
+  if (account == null) throw new Error('fixture 应有账户');
+  qc.setQueryData(['hl-pair-rebalance', value.pair.id, account], {
+    configured: true,
+    pair_id: value.pair.id,
+    account_address: account,
+    enabled: true,
+    target_notional: '2000',
+    threshold_pct: '10',
+    rule_revision: 1,
+    status: 'candidate',
+    worker_available: true,
+    last_attempt_at: '2026-11-12T00:00:00Z',
+    last_checked_at: '2026-11-12T00:00:00Z',
+    consecutive_count: 2,
+    current_notionals: ['2300', '1980'],
+    drift_pct: ['15', '1'],
+    open_orders: 0,
+    position_state: 'opposite',
+    candidate_leg_indices: [0],
+    candidate_preview: {
+      legs: [{ coin: 'xyz:NBIS', action: 'sell', order_qty: '1.5', protect_px: '150' }],
+    },
+    candidate_at: '2026-11-12T00:00:00Z',
+    cooldown_until: null,
+    last_action_id: null,
+    last_request_id: null,
+    last_error: null,
+    risk_blocked: false,
+    events: [],
+  });
+  const html = renderDetail(qc, value.pair.id);
+  assert.match(html, /阈值再平衡/);
+  assert.match(html, /连续确认/);
+  assert.match(html, /（候选腿）/);
+  assert.match(html, /触发时预览/);
+  assert.match(html, /卖出/);
+  assert.match(html, /1.5/);
+  assert.match(html, /重新预览并人工再平衡/);
+  assert.match(html, /不会自动下单/);
+  qc.clear();
+});
+
 test('交易历史位于详情页底部并展示两腿成交与订单 ID', () => {
   const value = snapshot(hypeFixture);
   const qc = seed(value);

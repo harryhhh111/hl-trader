@@ -34,7 +34,7 @@ test("账户添加与调仓表单按需弹窗展示", async ({ page }) => {
   await page.goto("/hyperliquid/pairs/nbis-crwv");
   await expect(page.getByRole("heading", { name: "NBIS / CRWV" })).toBeVisible();
   await expect(page.getByLabel("账户名称")).toHaveCount(0);
-  await expect(page.getByLabel("每腿目标名义")).toHaveCount(0);
+  await expect(page.getByLabel("每腿目标名义", { exact: true })).toHaveCount(0);
   await expect(page.getByText("托管 API Wallet", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "调整仓位", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
@@ -100,6 +100,54 @@ test("Pair 风险规则保存后展示触发提醒和人工平仓预览", async 
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("每腿目标名义")).toHaveValue("0");
   await expect(dialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
+});
+
+test("阈值再平衡保存规则并仅打开候选腿的人工预览", async ({ page }) => {
+  await login(page);
+  await page.goto("/hyperliquid/pairs/nbis-crwv");
+  await page.getByLabel("再平衡每腿目标名义").fill("2000");
+  await page.getByLabel("再平衡偏离阈值").fill("10");
+  await page.getByLabel("启用阈值再平衡监控").check();
+  await page.getByRole("button", { name: "保存再平衡规则", exact: true }).click();
+  await expect(page.getByText("规则已保存；连续确认和冷却状态已重新开始。")).toBeVisible();
+
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/rebalance?*", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ data: {
+      configured: true,
+      pair_id: "nbis-crwv",
+      account_address: "0x0000000000000000000000000000000000000043",
+      enabled: true,
+      target_notional: "2000",
+      threshold_pct: "10",
+      rule_revision: 1,
+      status: "candidate",
+      worker_available: true,
+      last_attempt_at: "2026-11-12T00:00:00Z",
+      last_checked_at: "2026-11-12T00:00:00Z",
+      consecutive_count: 2,
+      current_notionals: ["2300", "1980"],
+      drift_pct: ["15", "1"],
+      open_orders: 0,
+      position_state: "opposite",
+      candidate_leg_indices: [0],
+      candidate_preview: null,
+      candidate_at: "2026-11-12T00:00:00Z",
+      cooldown_until: null,
+      last_action_id: null,
+      last_request_id: null,
+      last_error: null,
+      risk_blocked: false,
+      events: [],
+    } }),
+  }));
+  await page.reload();
+  await page.getByRole("button", { name: "重新预览并人工再平衡", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "调整指定腿仓位", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("每腿目标名义", { exact: true })).toHaveValue("2000");
+  await expect(dialog.getByText("本次仅调整 xyz:NBIS，另一腿保持不动。")).toBeVisible();
 });
 
 test("单合约杠杆展示并经人工确认完成托管调整", async ({ page }) => {

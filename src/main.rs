@@ -145,6 +145,9 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
+        #[arg(long = "leg-index")]
+        leg_indices: Vec<usize>,
         /// agent 私钥文件；仅 --execute 使用，dry-run 不读取。
         #[arg(long, conflicts_with = "secret_fd")]
         secret_file: Option<PathBuf>,
@@ -179,6 +182,9 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
+        #[arg(long = "leg-index")]
+        leg_indices: Vec<usize>,
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
@@ -196,6 +202,9 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
+        #[arg(long = "leg-index")]
+        leg_indices: Vec<usize>,
         #[arg(long)]
         state_dir: PathBuf,
         #[arg(long)]
@@ -343,6 +352,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            leg_indices,
             secret_file,
             secret_fd,
             state_dir,
@@ -357,6 +367,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    leg_indices,
                     secret_file,
                     secret_fd,
                     state_dir,
@@ -372,6 +383,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            leg_indices,
             state_dir,
             signer,
             json: _,
@@ -383,6 +395,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    leg_indices,
                     state_dir,
                     signer,
                 },
@@ -394,6 +407,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            leg_indices,
             state_dir,
             signer,
             action_id,
@@ -407,6 +421,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    leg_indices,
                     state_dir,
                     signer,
                 },
@@ -1117,11 +1132,26 @@ struct AdjustCommand {
     address: String,
     notional: String,
     max_notional: String,
+    leg_indices: Vec<usize>,
     secret_file: Option<PathBuf>,
     secret_fd: Option<std::os::fd::RawFd>,
     state_dir: Option<PathBuf>,
     request_id: Option<String>,
     execute: bool,
+}
+
+fn leg_selection(indices: &[usize]) -> Result<[bool; 2], String> {
+    if indices.is_empty() {
+        return Ok([true, true]);
+    }
+    let mut selected = [false, false];
+    for index in indices {
+        if *index > 1 || selected[*index] {
+            return Err("--leg-index 只能分别指定 0 和 1，且不能重复".into());
+        }
+        selected[*index] = true;
+    }
+    Ok(selected)
 }
 
 fn valid_request_id(value: &str) -> bool {
@@ -1215,6 +1245,7 @@ async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> Ex
         address,
         notional,
         max_notional,
+        leg_indices,
         secret_file,
         secret_fd,
         state_dir,
@@ -1241,6 +1272,10 @@ async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> Ex
     let maximum = match max_notional.parse::<Decimal>() {
         Ok(maximum) => maximum,
         Err(error) => return usage_err(format!("--max-notional 非法: {error}")),
+    };
+    let leg_indices = match leg_selection(&leg_indices) {
+        Ok(selected) => selected,
+        Err(error) => return usage_err(error),
     };
     if request_id
         .as_deref()
@@ -1283,6 +1318,7 @@ async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> Ex
         account,
         target_notional: target,
         max_notional: maximum,
+        leg_indices,
         state_dir: state_dir
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("")),
@@ -1315,6 +1351,7 @@ struct BrowserCommand {
     address: String,
     notional: String,
     max_notional: String,
+    leg_indices: Vec<usize>,
     state_dir: PathBuf,
     signer: String,
 }
@@ -1326,6 +1363,7 @@ struct BrowserContext {
     account: Address,
     target: Decimal,
     maximum: Decimal,
+    leg_indices: [bool; 2],
     state_dir: PathBuf,
     signer: Address,
 }
@@ -1339,6 +1377,7 @@ impl BrowserContext {
             account: self.account,
             target_notional: self.target,
             max_notional: self.maximum,
+            leg_indices: self.leg_indices,
             state_dir: &self.state_dir,
             request_id: None,
         }
@@ -1375,6 +1414,10 @@ fn load_browser_context(
         Ok(maximum) => maximum,
         Err(error) => return Err(usage_err(format!("--max-notional 非法: {error}"))),
     };
+    let leg_indices = match leg_selection(&command.leg_indices) {
+        Ok(selected) => selected,
+        Err(error) => return Err(usage_err(error)),
+    };
     if let Err(error) = Adapter::check_clock() {
         return Err(runtime_err(error));
     }
@@ -1384,6 +1427,7 @@ fn load_browser_context(
         account,
         target,
         maximum,
+        leg_indices,
         state_dir: command.state_dir,
         signer,
         path: config_path.to_path_buf(),

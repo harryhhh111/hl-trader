@@ -74,6 +74,9 @@ export async function refreshHyperliquid(
   await qc.invalidateQueries({
     queryKey: pairId == null ? ['hl-pair-risk'] : ['hl-pair-risk', pairId],
   });
+  await qc.invalidateQueries({
+    queryKey: pairId == null ? ['hl-pair-rebalance'] : ['hl-pair-rebalance', pairId],
+  });
   if (pairId == null) {
     await qc.invalidateQueries({ queryKey: ['hl-announcements'] });
   }

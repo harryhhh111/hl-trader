@@ -111,6 +111,21 @@ def test_managed_preview_execute_and_duplicate_return_original(ready, monkeypatc
     assert managed.get_managed_execution(ready.runtime_url, "nbis-crwv", request_id) == executed
 
 
+def test_managed_request_id_cannot_change_leg_scope(ready, monkeypatch) -> None:
+    request_id = str(uuid.uuid4())
+    monkeypatch.setattr(
+        managed.adjustments, "preview",
+        lambda *args: {**report(pairs.load_pairs()[0], request_id, "preview"), "leg_indices": args[-1]},
+    )
+    previewed = managed.preview_managed(
+        ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0],
+        "2000", request_id, 1, session(), [0],
+    )
+    assert previewed["leg_indices"] == [0]
+    with pytest.raises(wallets.WalletError, match="request_id 已用于其他调仓请求"):
+        execute(ready, request_id)
+
+
 def test_unknown_blocks_new_execution_and_wallet_mutation(ready, monkeypatch) -> None:
     request_id = str(uuid.uuid4())
     monkeypatch.setattr(managed.adjustments, "preview", lambda *_args: report(pairs.load_pairs()[0], request_id, "preview"))

@@ -102,6 +102,8 @@ pub struct AdjustmentReport {
     pub config_revision: String,
     pub account_address: String,
     pub target_notional: Decimal,
+    #[serde(default = "default_leg_indices")]
+    pub leg_indices: Vec<usize>,
     pub created_at: String,
     pub legs: Vec<AdjustmentLeg>,
     pub diagnostics: Vec<String>,
@@ -111,6 +113,19 @@ pub struct AdjustmentReport {
     pub signing_requests: Vec<SigningRequest>,
 }
 
+fn default_leg_indices() -> Vec<usize> {
+    vec![0, 1]
+}
+
+fn selected_leg_indices(request: &AdjustRequest<'_>) -> Vec<usize> {
+    request
+        .leg_indices
+        .iter()
+        .enumerate()
+        .filter_map(|(index, selected)| selected.then_some(index))
+        .collect()
+}
+
 pub struct AdjustRequest<'a> {
     pub pair: &'a DashboardPair,
     pub config_path: &'a Path,
@@ -118,6 +133,7 @@ pub struct AdjustRequest<'a> {
     pub account: Address,
     pub target_notional: Decimal,
     pub max_notional: Decimal,
+    pub leg_indices: [bool; 2],
     pub state_dir: &'a Path,
     pub request_id: Option<&'a str>,
 }
@@ -360,6 +376,9 @@ async fn build_plan(
     if request.max_notional <= Decimal::ZERO {
         return Err(AdjustError::Refused("每腿名义上限必须为正数".into()));
     }
+    if !request.leg_indices.contains(&true) {
+        return Err(AdjustError::Refused("至少选择一条调仓腿".into()));
+    }
     if request.target_notional < Decimal::ZERO
         || (request.target_notional > Decimal::ZERO && request.target_notional < Decimal::TEN)
         || request.target_notional > request.max_notional
@@ -405,8 +424,16 @@ async fn build_plan(
         let market = &markets[index];
         let book = adapter.bbo(&market.name).await?;
         let mid = mid(&book, &market.name)?;
-        let target_size = pair::floor_qty(request.target_notional / mid, market.sz_decimals);
-        if request.target_notional > Decimal::ZERO
+        let current_signed = start_positions[index];
+        let current_size = current_signed.abs();
+        let selected = request.leg_indices[index];
+        let target_size = if selected {
+            pair::floor_qty(request.target_notional / mid, market.sz_decimals)
+        } else {
+            current_size
+        };
+        if selected
+            && request.target_notional > Decimal::ZERO
             && (target_size <= Decimal::ZERO || target_size * mid < Decimal::TEN)
         {
             return Err(AdjustError::Refused(format!(
@@ -414,8 +441,6 @@ async fn build_plan(
                 market.name
             )));
         }
-        let current_signed = start_positions[index];
-        let current_size = current_signed.abs();
         let delta = target_size - current_size;
         let (mut action, mut order_qty, reduce_only) = if delta > Decimal::ZERO {
             (if index == 0 { "buy" } else { "sell" }, delta, false)
@@ -430,7 +455,8 @@ async fn build_plan(
         } else {
             Decimal::ZERO
         };
-        let mut result = None;
+        let mut result =
+            (!selected).then_some(format!("{} 不在本次调仓范围内，保持当前仓位", market.name));
         if order_qty > Decimal::ZERO && order_qty * protect < Decimal::TEN {
             result = Some(format!(
                 "{} 的调仓差额低于最小下单名义 10 USD，已跳过该腿",
@@ -498,6 +524,7 @@ async fn build_plan(
             config_revision: request.config_revision.into(),
             account_address: format!("{}", request.account).to_lowercase(),
             target_notional: request.target_notional,
+            leg_indices: selected_leg_indices(request),
             created_at: now_utc(),
             legs,
             diagnostics,
@@ -1028,6 +1055,7 @@ pub async fn submit_browser_adjustment(
         || report.pair_id != request.pair.descriptor.id
         || report.account_address != format!("{}", request.account).to_lowercase()
         || report.config_revision != request.config_revision
+        || report.leg_indices != selected_leg_indices(request)
     {
         return Err(AdjustError::Refused(
             "调仓动作身份或状态已变化，请重新预览并签名".into(),
@@ -1313,6 +1341,7 @@ mod tests {
                 account: USER.parse().unwrap(),
                 target_notional: Decimal::new(2000, 0),
                 max_notional: Decimal::new(5000, 0),
+                leg_indices: [true, true],
                 state_dir: &self.state_dir,
                 request_id: None,
             }
@@ -1705,6 +1734,44 @@ mod tests {
         assert!(report.legs.iter().all(|leg| leg.cloid.is_none()));
         assert_eq!(exchange.calls(), 0);
         assert!(!fixture.state_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn selected_leg_execution_leaves_the_other_leg_unchanged() {
+        let (server, fixture) = setup(vec![account("250", "-30"), account("200", "-30")]).await;
+        let selected = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#)
+                .body_includes(r#""s":"50""#);
+            then.status(200).body(filled(11, "50", "10"));
+        });
+        let untouched = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#);
+            then.status(500);
+        });
+        let mut request = fixture.request();
+        request.leg_indices = [true, false];
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &request,
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.status, AdjustmentStatus::Succeeded);
+        assert_eq!(report.leg_indices, vec![0]);
+        assert_eq!(report.legs[0].status, AdjustmentLegStatus::Filled);
+        assert_eq!(report.legs[1].status, AdjustmentLegStatus::NotRequired);
+        assert_eq!(report.legs[1].action, "none");
+        assert_eq!(report.legs[1].target_size, Decimal::new(30, 0));
+        assert_eq!(report.legs[1].final_size, Some(Decimal::new(30, 0)));
+        assert_eq!(selected.calls(), 1);
+        assert_eq!(untouched.calls(), 0);
     }
 
     #[tokio::test]

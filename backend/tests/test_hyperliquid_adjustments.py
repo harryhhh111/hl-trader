@@ -66,6 +66,28 @@ def test_default_leg_notional_limit_is_15000(monkeypatch) -> None:
     assert adjustments._maximum() == Decimal("15000")
 
 
+def test_selected_leg_scope_is_passed_and_checked(configured, monkeypatch) -> None:
+    calls = []
+
+    def run(_descriptor, _account, _target, execute, leg_indices=None):
+        calls.append((execute, leg_indices))
+        return {**report(configured), "leg_indices": [0]}
+
+    monkeypatch.setattr(adjustments, "_run", run)
+    result = adjustments.preview(
+        "postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured, "2000", leg_indices=[0],
+    )
+    assert result["leg_indices"] == [0]
+    assert calls == [(False, [0])]
+    with pytest.raises(adjustments.AdjustmentError, match="不重复"):
+        adjustments.preview(
+            "postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured, "2000", leg_indices=[0, 0],
+        )
+    descriptor = next(item for item in pairs.load_pairs()[1] if item["id"] == "nbis-crwv")
+    with pytest.raises(adjustments.AdjustmentError, match="身份校验失败"):
+        adjustments._parse_report(json.dumps(report(configured)), descriptor, ADDRESS_LOWER, Decimal("2000"), leg_indices=[0])
+
+
 def test_stale_revision_or_account_is_rejected_before_running(configured, monkeypatch) -> None:
     monkeypatch.setattr(adjustments, "_run", lambda *_args: pytest.fail("must not run"))
     with pytest.raises(adjustments.AdjustmentError, match="配置已变化") as error:

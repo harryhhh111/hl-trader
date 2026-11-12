@@ -35,6 +35,18 @@ def _decimal_arg(value: Decimal) -> str:
     return format(value, "f")
 
 
+def _leg_indices(value: list[int] | None) -> list[int]:
+    if value is None:
+        return [0, 1]
+    if (
+        not isinstance(value, list) or not value
+        or any(type(index) is not int or index not in {0, 1} for index in value)
+        or len(set(value)) != len(value)
+    ):
+        raise AdjustmentError(422, "leg_indices 只能包含不重复的 0 和 1")
+    return sorted(value)
+
+
 def _maximum() -> Decimal:
     value = _decimal(os.environ.get("HL_APP_MAX_LEG_NOTIONAL_USD", "15000"), "每腿名义上限")
     if value <= 0:
@@ -67,7 +79,9 @@ def _resolve(url: str, pair_id: str, account_address: str, config_revision: str,
 
 def _parse_report(
     stdout: str, descriptor: dict, account: str, target: Decimal, config_revision: str | None = None,
+    leg_indices: list[int] | None = None,
 ) -> dict | None:
+    selected = _leg_indices(leg_indices)
     try:
         report = json.loads(stdout)
     except json.JSONDecodeError:
@@ -82,6 +96,7 @@ def _parse_report(
         or report.get("account_address") != account
         or report.get("config_revision") != (config_revision or pairs_service.load_pairs()[0])
         or _decimal_arg(_decimal(str(report.get("target_notional", "")), "目标名义")) != _decimal_arg(target)
+        or report.get("leg_indices", [0, 1]) != selected
         or not isinstance(report.get("legs"), list)
         or len(report["legs"]) != 2
     ):
@@ -93,7 +108,7 @@ def _parse_report(
 
 def _invoke(
     argv: list[str], descriptor: dict, account: str, target: Decimal, execute: bool,
-    pass_fds: tuple[int, ...] = (),
+    pass_fds: tuple[int, ...] = (), leg_indices: list[int] | None = None,
 ) -> dict:
     config_revision = pairs_service.load_pairs()[0]
     try:
@@ -109,7 +124,7 @@ def _invoke(
     except HyperliquidUnavailable as exc:
         detail = "调仓进程中断，订单结果未知；禁止重试，请先核对交易所记录" if execute else "调仓预览或签名准备超时"
         raise AdjustmentError(503, detail) from exc
-    report = _parse_report(stdout, descriptor, account, target, config_revision)
+    report = _parse_report(stdout, descriptor, account, target, config_revision, leg_indices)
     if report is not None:
         return report
     if proc.returncode == 2:
@@ -120,16 +135,24 @@ def _invoke(
     raise AdjustmentError(503, "调仓预览或签名准备失败，请稍后重试")
 
 
-def _base_argv(descriptor: dict, account: str, target: Decimal, command: str) -> list[str]:
+def _base_argv(
+    descriptor: dict, account: str, target: Decimal, command: str,
+    leg_indices: list[int] | None = None,
+) -> list[str]:
     binary = os.environ.get("HL_APP_TRADER_BIN", "").strip()
     config = os.environ.get("HL_APP_PAIRS_CONFIG", "").strip()
     if not binary or not config:
         raise AdjustmentError(503, "调仓执行器未配置")
-    return [
+    selected = _leg_indices(leg_indices)
+    argv = [
         binary, "--config", config, command, "--pair", descriptor["id"],
         "--address", account, "--notional", _decimal_arg(target),
         "--max-notional", _decimal_arg(_maximum()), "--json",
     ]
+    if selected != [0, 1]:
+        for index in selected:
+            argv.extend(["--leg-index", str(index)])
+    return argv
 
 
 def _state_dir() -> str:
@@ -139,25 +162,35 @@ def _state_dir() -> str:
     return state_dir
 
 
-def _run(descriptor: dict, account: str, target: Decimal, execute: bool) -> dict:
-    argv = _base_argv(descriptor, account, target, "adjust")
+def _run(
+    descriptor: dict, account: str, target: Decimal, execute: bool,
+    leg_indices: list[int] | None = None,
+) -> dict:
+    selected = _leg_indices(leg_indices)
+    argv = _base_argv(descriptor, account, target, "adjust", selected)
     if execute:
         if not _execution_ready():
             raise AdjustmentError(503, "真实调仓未开启或 agent/回执目录未配置")
         secret_file = os.environ["HL_APP_AGENT_SECRET_FILE"].strip()
         argv.extend(["--secret-file", secret_file, "--state-dir", _state_dir(), "--execute"])
-    return _invoke(argv, descriptor, account, target, execute)
+    if selected == [0, 1]:
+        return _invoke(argv, descriptor, account, target, execute)
+    return _invoke(argv, descriptor, account, target, execute, leg_indices=selected)
 
 
 def preview(
     url: str, pair_id: str, account_address: str, config_revision: str, target_notional: str,
-    owner_account_id: int | None = None,
+    owner_account_id: int | None = None, leg_indices: list[int] | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+    selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
-    report = _run(descriptor, account, target, execute=False)
+    if selected == [0, 1]:
+        report = _run(descriptor, account, target, execute=False)
+    else:
+        report = _run(descriptor, account, target, execute=False, leg_indices=selected)
     report["execution_enabled"] = _execution_ready()
     report["browser_wallet_enabled"] = True
     report["max_leg_notional_usd"] = _decimal_arg(_maximum())
@@ -172,15 +205,19 @@ def execute(
     target_notional: str,
     confirmation: str,
     owner_account_id: int | None = None,
+    leg_indices: list[int] | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
     if confirmation.strip() != _decimal_arg(target):
         raise AdjustmentError(422, "确认金额必须与每腿目标名义完全一致")
+    selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     try:
-        return _run(descriptor, account, target, execute=True)
+        if selected == [0, 1]:
+            return _run(descriptor, account, target, execute=True)
+        return _run(descriptor, account, target, execute=True, leg_indices=selected)
     finally:
         pairs_service.clear_runtime_cache()
 
@@ -200,15 +237,20 @@ def prepare_browser(
     target_notional: str,
     expected_signer: str,
     owner_account_id: int | None = None,
+    leg_indices: list[int] | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+    selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
-    argv = _base_argv(descriptor, account, target, "adjust-prepare")
+    argv = _base_argv(descriptor, account, target, "adjust-prepare", selected)
     argv.extend(["--state-dir", _state_dir(), "--signer", signer])
-    report = _invoke(argv, descriptor, account, target, execute=False)
+    if selected == [0, 1]:
+        report = _invoke(argv, descriptor, account, target, execute=False)
+    else:
+        report = _invoke(argv, descriptor, account, target, execute=False, leg_indices=selected)
     if report.get("expected_signer") != signer or not report.get("action_id"):
         raise AdjustmentError(503, "待签名结果的 API Wallet 或动作身份不符")
     return report
@@ -246,10 +288,12 @@ def submit_browser(
     action_id: str,
     signatures: list[dict],
     owner_account_id: int | None = None,
+    leg_indices: list[int] | None = None,
 ) -> dict:
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+    selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
     checked = _validated_signatures(signatures)
@@ -259,13 +303,16 @@ def submit_browser(
         or any(character not in "0123456789abcdef" for character in action_id[9:])
     ):
         raise AdjustmentError(422, "调仓动作 ID 非法")
-    argv = _base_argv(descriptor, account, target, "adjust-submit")
+    argv = _base_argv(descriptor, account, target, "adjust-submit", selected)
     argv.extend([
         "--state-dir", _state_dir(), "--signer", signer,
         "--action-id", action_id, "--signatures", json.dumps(checked, separators=(",", ":")),
     ])
     try:
-        report = _invoke(argv, descriptor, account, target, execute=True)
+        if selected == [0, 1]:
+            report = _invoke(argv, descriptor, account, target, execute=True)
+        else:
+            report = _invoke(argv, descriptor, account, target, execute=True, leg_indices=selected)
     finally:
         pairs_service.clear_runtime_cache()
     if report.get("expected_signer") != signer or report.get("action_id") != action_id:

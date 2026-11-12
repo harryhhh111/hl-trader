@@ -32,6 +32,7 @@ def _request_id(value: str) -> str:
 
 def _payload_hash(
     descriptor: dict, account: str, target: Decimal, config_revision: str, wallet_version: int,
+    leg_indices: list[int],
 ) -> str:
     body = {
         "network": descriptor["network"],
@@ -40,6 +41,7 @@ def _payload_hash(
         "target_notional": adjustments._decimal_arg(target),
         "config_revision": config_revision,
         "wallet_version": wallet_version,
+        "leg_indices": leg_indices,
     }
     encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -101,13 +103,15 @@ def preview_managed(
     request_id: str,
     wallet_version: int,
     session: SessionInfo,
+    leg_indices: list[int] | None = None,
 ) -> dict:
     request_id = _request_id(request_id)
     if type(wallet_version) is not int or wallet_version < 1:
         raise wallets.WalletError(422, "托管钱包版本非法")
     target = adjustments._decimal(target_notional, "每腿目标名义")
+    selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
-    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version)
+    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             existing = _matching_existing(
@@ -118,7 +122,12 @@ def preview_managed(
             _active_wallet(cursor, descriptor, account, wallet_version)
             if wallets._active_execution(cursor, descriptor["network"], pair_id, account):
                 raise wallets.WalletError(409, "存在执行中或待核对的调仓，请完成核对后再预览")
-    report = adjustments.preview(url, pair_id, account, config_revision, target_notional, session.account_id)
+    if selected == [0, 1]:
+        report = adjustments.preview(url, pair_id, account, config_revision, target_notional, session.account_id)
+    else:
+        report = adjustments.preview(
+            url, pair_id, account, config_revision, target_notional, session.account_id, selected,
+        )
     preview_hash = _preview_hash(report)
     report.update({
         "request_id": request_id,
@@ -211,13 +220,15 @@ def execute_managed(
     request_id: str,
     wallet_version: int,
     session: SessionInfo,
+    leg_indices: list[int] | None = None,
 ) -> tuple[dict, int]:
     request_id = _request_id(request_id)
     target = adjustments._decimal(target_notional, "每腿目标名义")
     if confirmation.strip() != adjustments._decimal_arg(target):
         raise wallets.WalletError(422, "确认金额必须与每腿目标名义完全一致")
+    selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
-    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version)
+    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             wallets._lock_scope(cursor, descriptor["network"], pair_id, account)
@@ -253,7 +264,7 @@ def execute_managed(
             wallet["encrypted_private_key"], descriptor["network"], pair_id, account,
             wallet["wallet_address"], wallet_version,
         )
-        argv = adjustments._base_argv(descriptor, account, target, "adjust")
+        argv = adjustments._base_argv(descriptor, account, target, "adjust", selected)
         argv.extend([
             "--secret-fd", "0", "--state-dir", adjustments._state_dir(),
             "--request-id", request_id, "--execute",
@@ -269,9 +280,14 @@ def execute_managed(
                 view = view[written:]
             os.lseek(fd, 0, os.SEEK_SET)
             argv[argv.index("--secret-fd") + 1] = str(fd)
-            report = adjustments._invoke(
-                argv, descriptor, account, target, execute=True, pass_fds=(fd,)
-            )
+            if selected == [0, 1]:
+                report = adjustments._invoke(
+                    argv, descriptor, account, target, execute=True, pass_fds=(fd,),
+                )
+            else:
+                report = adjustments._invoke(
+                    argv, descriptor, account, target, execute=True, pass_fds=(fd,), leg_indices=selected,
+                )
         finally:
             os.close(fd)
             pairs_service.clear_runtime_cache()

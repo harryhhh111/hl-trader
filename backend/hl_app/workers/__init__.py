@@ -12,6 +12,7 @@ from ..collectors.sources import collect_source, ensure_sec_sources, registered_
 from ..collectors.sec_client import SECClient
 from ..services import ai
 from ..services import hyperliquid_risk
+from ..services import hyperliquid_rebalance
 
 WORKER_LIFECYCLE_LOCK_KEY = 0x484C5F574F524B31
 
@@ -76,8 +77,9 @@ def dry_run(url: str) -> dict:
         "collectors_enabled": os.environ.get("HL_APP_COLLECTORS_ENABLED", "false") == "true",
         "scheduler_enabled": os.environ.get("HL_APP_SCHEDULER_ENABLED", "false") == "true",
         "risk_monitor_enabled": os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false") == "true",
+        "rebalance_monitor_enabled": os.environ.get("HL_APP_REBALANCE_MONITOR_ENABLED", "false") == "true",
         "enhancement_enabled": _enhancement_enabled(),
-        "tasks": ["quotes", "announcements", "news_enhancement", "pair_risk"],
+        "tasks": ["quotes", "announcements", "news_enhancement", "pair_risk", "pair_rebalance"],
         "quote_targets": [row["stock_code"] for row in enabled_securities(url)],
         "sources": [
             {"source_id": row["source_id"], "kind": row["source_kind"], "issuer": row["issuer_identifier"]}
@@ -86,10 +88,14 @@ def dry_run(url: str) -> dict:
     }
 
 
+def _monitor_env(kind: str) -> str:
+    return "HL_APP_RISK_MONITOR_ENABLED" if kind == "pair_risk" else "HL_APP_REBALANCE_MONITOR_ENABLED"
+
+
 def run_once(url: str, kind: str, http_get=None) -> dict:
-    collectors_enabled = os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() == "true"
-    risk_enabled = os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false").lower() == "true"
-    if (kind == "pair_risk" and not risk_enabled) or (kind != "pair_risk" and not collectors_enabled):
+    monitor = kind in {"pair_risk", "pair_rebalance"}
+    enabled = os.environ.get(_monitor_env(kind) if monitor else "HL_APP_COLLECTORS_ENABLED", "false").lower() == "true"
+    if not enabled:
         return {"status": "disabled", "kind": kind}
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
@@ -100,12 +106,14 @@ def run_once(url: str, kind: str, http_get=None) -> dict:
 
 
 def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) -> dict:
-    if kind == "pair_risk":
-        if os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false").lower() != "true":
+    if kind in {"pair_risk", "pair_rebalance"}:
+        if os.environ.get(_monitor_env(kind), "false").lower() != "true":
             return {"status": "disabled", "kind": kind}
         lifecycle.ensure_healthy()
         assert_active(url)
-        return hyperliquid_risk.monitor_once(url)
+        if kind == "pair_risk":
+            return hyperliquid_risk.monitor_once(url)
+        return hyperliquid_rebalance.monitor_once(url)
     if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
         return {"status": "disabled", "kind": kind}
     lifecycle.ensure_healthy()
@@ -117,7 +125,7 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
             results.append({security["stock_code"]: collect_security(url, security)})
         return {"kind": kind, "results": results}
     if kind != "announcements":
-        raise ValueError("kind 只支持 quotes、announcements 或 pair_risk")
+        raise ValueError("kind 只支持 quotes、announcements、pair_risk 或 pair_rebalance")
     enhancer = enhance_record if _enhancement_enabled() else None
     ensure_sec_sources(url)
     sources = registered_sources(url)
@@ -137,10 +145,12 @@ def run_scheduler(url: str) -> None:
         raise RuntimeError("HL_APP_SCHEDULER_ENABLED 未启用")
     interval = max(60, int(os.environ.get("HL_APP_COLLECTION_INTERVAL_SECONDS", "3600")))
     risk_interval = max(5, int(os.environ.get("HL_APP_RISK_MONITOR_INTERVAL_SECONDS", "30")))
+    rebalance_interval = max(5, int(os.environ.get("HL_APP_REBALANCE_MONITOR_INTERVAL_SECONDS", "30")))
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
     next_collection = 0.0
     next_risk = 0.0
+    next_rebalance = 0.0
     try:
         while True:
             lifecycle.ensure_healthy()
@@ -153,9 +163,13 @@ def run_scheduler(url: str) -> None:
                 if now >= next_risk:
                     _run_once(url, "pair_risk", lifecycle)
                     next_risk = now + risk_interval
+                if now >= next_rebalance:
+                    _run_once(url, "pair_rebalance", lifecycle)
+                    next_rebalance = now + rebalance_interval
             except MaintenanceMode:
                 next_collection = now + interval
                 next_risk = now + risk_interval
-            time.sleep(min(5, risk_interval))
+                next_rebalance = now + rebalance_interval
+            time.sleep(min(5, risk_interval, rebalance_interval))
     finally:
         lifecycle.close()

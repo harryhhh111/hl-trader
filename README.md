@@ -21,7 +21,7 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 
 ## 独立 Web 应用
 
-原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。全自动止盈止损、阈值再平衡及 stock_data 资讯同步消费端尚未实现；实际部署版本另行核对。
+原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。阈值再平衡人工版已在当前代码实现，尚未部署或真实验收；全自动止盈止损及 stock_data 资讯同步消费端尚未实现。实际部署版本另行核对。
 
 需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
 
@@ -57,7 +57,7 @@ Web 固定单进程，启动时持有 PostgreSQL 生命周期锁，不自动建�
 
 ### Docker Compose 本机空库部署
 
-`compose.yaml` 提供单进程 Web、Nginx 和独立 worker，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`。worker 默认只运行 Pair 风险只读监控，股票采集和 AI 增强默认关闭；没有启用规则的账户不会被监控。默认示例使用 HTTP 和 `Secure cookie=false`，后端因此只接受 localhost 本机 Origin；LAN 或公网访问需另行配置 HTTPS、`Secure cookie=true` 和实际可信 Origin。
+`compose.yaml` 提供单进程 Web、Nginx 和独立 worker，并在镜像内构建 Rust CLI 与前端；PostgreSQL 使用本机已有 database 中独立的 `hl_app` schema，不创建数据库或数据库容器。入口绑定本机内网地址 `172.25.0.94:28080`。worker 默认运行 Pair 风险和阈值再平衡只读监控，股票采集和 AI 增强默认关闭；没有启用规则的账户不会被监控。默认示例使用 HTTP 和 `Secure cookie=false`，后端因此只接受 localhost 本机 Origin；LAN 或公网访问需另行配置 HTTPS、`Secure cookie=true` 和实际可信 Origin。
 
 ```sh
 mkdir -p .runtime
@@ -228,6 +228,12 @@ pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损
 
 该口径不包含历史已实现盈亏、资金费和手续费。全自动止盈止损尚未实现；IOC 部分成交、断线和裸露仓位风险仍按现有调仓回执处理。
 
+### 阈值再平衡监控与人工确认
+
+pair 详情页可按当前登录用户、pair 和账户设置两腿共同的目标 USD 名义及偏离阈值。worker 默认每 30 秒读取实际两腿名义，任一腿偏离达到阈值且连续两次有效检查后，只把超阈值腿列入候选，并调用只读调仓预览；未超阈值腿保持不动。空仓不会生成新开仓候选，同向持仓、数据缺失或过期不会触发。
+
+页面展示当前偏离、连续确认、触发时预览和冷却状态。用户必须点击“重新预览并人工再平衡”，通过现有托管或浏览器签名链路确认；worker 不读取私钥、不下单。成功后默认冷却 300 秒，拒单、部分成交和未知结果沿用调仓回执；Pair 风险退出触发时取消并暂停再平衡候选。migration `012_threshold_rebalancing.sql` 保存规则、候选和事件。该功能代码与离线测试已完成时仍需单独部署和真实验收，不能视为自动交易。
+
 ### 单合约杠杆与保证金模式
 
 Pair 详情和调仓弹窗的“下单前检查”显示两腿当前保证金模式、设置杠杆、应用上限 3x、交易所上限和检查时间，空仓也会读取设置。增仓要求支持全仓的市场使用 `cross`，仅支持逐仓的市场（`onlyIsolated`、`noCross`、`strictIsolated`）允许 `isolated` 例外；两腿设置杠杆均须不超过 `min(3, 市场上限)`。检查失败或读取失败禁止增仓，纯 `reduce-only` 减仓和平仓仍可操作。3x 是逐合约设置上限，不是账户总名义 / 权益的有效杠杆上限。
@@ -248,6 +254,7 @@ pair 详情页可输入每腿目标绝对名义（例如 `2000` USD），先按�
 ```sh
 hl-trader --config /固定路径/pairs.json adjust --pair nbis-crwv \
   --address 0x<当前账户> --notional 2000 --max-notional 15000 --json
+# 再平衡等受控流程可重复传入 --leg-index 0/1，仅调整指定腿；缺省仍为两腿。
 ```
 
 Web 真实执行由浏览器中的 API Wallet 完成：后端生成每腿 Hyperliquid L1 action 的 EIP-712 typed data，

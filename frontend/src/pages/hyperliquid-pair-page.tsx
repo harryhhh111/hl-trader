@@ -7,6 +7,7 @@ import { EChartsWrapper } from '@/components/charts/echarts-wrapper';
 import { AccountSettings } from '@/components/hyperliquid/account-settings';
 import { PositionAdjustment } from '@/components/hyperliquid/position-adjustment';
 import { PairRiskControls } from '@/components/hyperliquid/pair-risk-controls';
+import { RebalanceControls } from '@/components/hyperliquid/rebalance-controls';
 import { PairOrderPreflight } from '@/components/hyperliquid/order-preflight';
 import { TradeHistory } from '@/components/hyperliquid/trade-history';
 import { PageHeader } from '@/components/layout/page-header';
@@ -131,6 +132,7 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
       </Card>
 
       <PairRiskControls descriptor={descriptor} configRevision={configRevision} />
+      <RebalanceControls descriptor={descriptor} configRevision={configRevision} />
       <PairOrderPreflight descriptor={descriptor} configRevision={configRevision} />
 
       <BlockFrame title={`${first} / ${second} 比价`} block={ratio} hint="UTC 已收盘日线；缺失日期断线；30/90 天切换。">

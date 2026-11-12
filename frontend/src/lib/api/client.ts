@@ -88,6 +88,19 @@ export const hyperliquidPairsApi = {
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/risk`,
     { method: "PUT", body: JSON.stringify(body) },
   ),
+  pairRebalance: (pairId: string, accountAddress: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairRebalance>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/rebalance?account_address=${encodeURIComponent(accountAddress)}`,
+  ),
+  savePairRebalance: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    enabled: boolean;
+    target_notional: string;
+    threshold_pct: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlPairRebalance>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/rebalance`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ),
   adjustmentPreflight: (pairId: string, account: string, revision: string) => apiFetch<import("@/lib/types/hyperliquid").HlOrderPreflight>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustment-preflight?${new URLSearchParams({ account_address: account, config_revision: revision })}`,
   ),
@@ -146,6 +159,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
   }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/preview`,
     { method: "POST", body: JSON.stringify(body) },
@@ -154,6 +168,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
     confirmation: string;
   }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/execute`,
@@ -163,6 +178,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
     expected_signer: string;
   }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/browser-prepare`,
@@ -172,6 +188,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
     expected_signer: string;
     action_id: string;
     signatures: { leg_index: number; signature: string }[];
@@ -213,6 +230,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
     request_id: string;
     wallet_version: number;
   }) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
@@ -223,6 +241,7 @@ export const hyperliquidPairsApi = {
     target_notional: string;
     account_address: string;
     config_revision: string;
+    leg_indices?: number[];
     request_id: string;
     wallet_version: number;
     confirmation: string;

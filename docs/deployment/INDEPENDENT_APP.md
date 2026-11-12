@@ -101,16 +101,17 @@ docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.managed
 离线 mock 通过不代表浏览器钱包、主网成交、流动性或 API Wallet 授权已验收，首次浏览器签名、真实钱包导入
 和主网小额联调必须另行明确授权。
 
-非 Docker worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`、`HL_APP_RISK_MONITOR_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
+非 Docker worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`、`HL_APP_RISK_MONITOR_ENABLED=false`、`HL_APP_REBALANCE_MONITOR_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
 
 ```sh
 .venv/bin/python -m hl_app.workers --once --kind quotes
 .venv/bin/python -m hl_app.workers --once --kind announcements
 .venv/bin/python -m hl_app.workers --once --kind pair_risk
+.venv/bin/python -m hl_app.workers --once --kind pair_rebalance
 .venv/bin/python -m hl_app.workers --run
 ```
 
-Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`，但只处理网页中显式启用的规则，不执行交易。默认检查间隔和最大数据年龄均为 30 秒；Web 用 `HL_APP_RISK_MONITOR_STALE_SECONDS=60` 判断监控是否过期。只启动 `web gateway` 的部署命令不会启动 worker，需要风险监控时应使用全服务命令或把 `worker` 加入启动列表。
+Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`、`HL_APP_REBALANCE_MONITOR_ENABLED=true`，但只处理网页中显式启用的规则，不执行交易。两类监控默认间隔均为 30 秒，快照最大年龄 30 秒；Web 用 `HL_APP_RISK_MONITOR_STALE_SECONDS=60` 判断监控是否过期。再平衡成功后默认冷却 `HL_APP_REBALANCE_COOLDOWN_SECONDS=300`。只启动 `web gateway` 的部署命令不会启动 worker，需要监控时应使用全服务命令或把 `worker` 加入启动列表。
 
 `deploy/hl-app-web.service.example`、`hl-app-worker.service.example` 和 `nginx.conf.example` 仅为模板，不启用。代理只暴露一个同源站点：`/api/v1` 到后端，其余 SPA fallback 到 dist。
 
