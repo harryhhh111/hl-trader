@@ -120,6 +120,19 @@ def test_http_leverage_contract(configured, monkeypatch) -> None:
         "/api/v1/hyperliquid/pairs/nbis-crwv/leverage/browser-prepare",
         json={**body, "unexpected": True},
     ).status_code == 422
+    assert client.post(
+        "/api/v1/hyperliquid/pairs/nbis-crwv/leverage/browser-prepare",
+        json={**body, "leverage": 4},
+    ).status_code == 422
+
+
+def test_application_cap_is_checked_before_process(configured, monkeypatch):
+    monkeypatch.setattr(leverage, "_invoke", lambda *_args: pytest.fail("must not invoke"))
+    with pytest.raises(Exception, match="3x"):
+        leverage.prepare_browser(
+            "postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured,
+            "xyz:NBIS", 4, "cross", API_WALLET,
+        )
 
 
 def test_managed_confirmation_and_payload_include_operation(configured) -> None:

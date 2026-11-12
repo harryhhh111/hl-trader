@@ -2,16 +2,18 @@
 
 本文只提供部署准备，不执行部署、重启、生产迁移或真实采集。真实地址、数据库、token、研究资料和公开 pair 配置由用户提供，不写入仓库。
 
+状态核对：2026-11-11，依据 `87ffcd8` 的代码和 Compose。原迁移 A–H 已交付；[托管钱包文档](../HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)记录过 2026-11-04 的本机 Docker 部署。本手册描述当前源码提供的操作方式，不证明后续账号注册、盘口和风险 worker 已部署，当前运行状态须另外核对。功能与历史证据范围见[项目状态](../PROJECT_STATUS.md)。
+
 ## 1. 组件与权限
 
-- Rust CLI：原交易功能保留；Web 仅执行固定 dashboard/adjust 参数数组，不接受任意命令、URL、账户或私钥路径。
+- Rust CLI：原交易功能保留；Web 由服务端选择固定的看板、盘口、调仓、签名准备或地址派生命令及参数数组，不接受任意命令、URL、未经校验的账户或秘密路径。
 - 单 FastAPI 进程：持有固定 Web advisory lock，不建表、不启动采集。禁止多 workers、滚动重叠和容器副本。
 - 单 worker：股票采集/增强与 Pair 风险只读监控共用固定生命周期锁；常驻与 `--once` 互斥。股票采集默认关闭，风险监控由独立开关控制，worker 不持有交易私钥。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
-Web 使用无 root 的独立 OS 身份，默认不挂载签名秘密；浏览器 API Wallet 在客户端持有私钥并签名，Web 只接收订单签名。托管模式仅挂载加密密钥并接收浏览器加密后的私钥载荷，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
+Web 使用无 root 的独立 OS 身份，基础 Compose 不挂载签名秘密；浏览器签名模式由客户端持有私钥，Web 只接收订单签名。托管模式挂载加密密钥并接收浏览器加密后的私钥载荷，执行时在内存中解密并经 memfd 传给 Rust，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
 
-`deploy/database.example.sql` 是角色示例，执行前先审查权限和默认 privileges。运行账号只有必要业务读写，不能 DDL，也不能修改认证、迁移或 operation control。
+`deploy/database.example.sql` 是角色示例，执行前先审查权限和默认 privileges。运行账号只有必要业务读写（包含注册账号和会话），不能 DDL，也不能修改 `auth_control`、迁移账本或 `operation_control`；钱包和风险事件表只允许追加。Docker 的实际授权范围以 `deploy/docker/grant-runtime.sql` 为准。
 
 ## 2. 安装
 
@@ -132,9 +134,11 @@ npm audit
 
 E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动 390×844。后端默认占用本机 8001 端口；已有服务占用时，可在 `frontend/` 下运行 `HL_APP_E2E_BACKEND_PORT=18001 npm run test:e2e`，不要停止现有服务。账号注册/登录另运行 `HL_APP_E2E_AUTH_MODE=account npm run test:e2e -- account-auth.spec.mjs`；该用例在默认 token 套件中自动跳过。真实来源/模型不属于默认回归。
 
-## 5. 预演与停写测量
+## 5. 原 full 迁移的预演与停写测量
 
-先在独立预演库完成 full 导入、基线、激活、业务变化、回退导出和源侧恢复。正式源 bundle 和源侧恢复适配由 stock_data agent 负责，未验收前不能切换。
+第 5–7 节只适用于[原 full 数据迁移合同](../migration/DATA_CONTRACT.md)，保留用于正式迁移和回退工具的演练。[资讯同步新合同](../STOCK_DATA_NEWS_SYNC_CONTRACT.md)是另一条尚未实现的“空资讯范围 bootstrap + 增量”链路，不要求这里的 full 包或 full lineage，不能把两者串成同一套启动步骤。
+
+若选择原 full 迁移，先在独立预演库完成 full 导入、基线、激活、业务变化、回退导出和源侧恢复。正式源 bundle 和源侧恢复适配由 stock_data agent 负责，未验收前不能切换。
 
 ```sh
 .venv/bin/python -m hl_app.migration inspect --bundle /path/to/full
@@ -167,4 +171,4 @@ E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动
 
 ## 8. 备份与检查
 
-备份包含 PostgreSQL 一致性快照、源冻结 full、注册 baseline、目标 rollback snapshot 和版本清单。迁移包是私有数据，权限 0700，不提交 Git。恢复检查必须比较自然键和值，不能只看行数或 updated_at。
+独立站备份包含 PostgreSQL 一致性快照、托管钱包密钥的独立加密备份、执行回执和版本/配置清单。认证、托管钱包、执行请求和风险规则不在原迁移的十实体 JSONL 包中，不能只备份该业务包。采用原 full 迁移时，还须保留源冻结 full、注册 baseline 和目标 rollback snapshot。迁移包是私有数据，权限 0700，不提交 Git。恢复检查必须比较自然键和值，不能只看行数或 updated_at；密钥与未知执行请求的恢复规则见托管钱包说明。

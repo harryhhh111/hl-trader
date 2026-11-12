@@ -11,6 +11,7 @@ from ..services import hyperliquid_accounts as accounts_service
 from ..services import hyperliquid_adjustments as adjustments_service
 from ..services import hyperliquid_history as history_service
 from ..services import hyperliquid_leverage as leverage_service
+from ..services import hyperliquid_preflight as preflight_service
 from ..services import hyperliquid_pairs as pairs_service
 from ..services import hyperliquid_quotes as quotes_service
 from ..services import hyperliquid_risk as risk_service
@@ -99,7 +100,7 @@ class LeverageRequest(BaseModel):
     account_address: str = Field(min_length=42, max_length=42)
     config_revision: str = Field(min_length=64, max_length=64)
     coin: str = Field(min_length=1, max_length=64)
-    leverage: int = Field(ge=1)
+    leverage: int = Field(ge=1, le=3, strict=True)
     margin_mode: str = Field(pattern="^(cross|isolated)$")
 
     model_config = {"extra": "forbid"}
@@ -300,6 +301,22 @@ def save_pair_risk(pair_id: str, body: RiskRuleSave, request: Request) -> dict:
         )}
     except Exception as exc:
         raise _risk_error(exc) from exc
+
+
+@router.get("/hyperliquid/pairs/{pair_id}/adjustment-preflight")
+def adjustment_preflight(pair_id: str, account_address: str, config_revision: str, request: Request) -> dict:
+    try:
+        return {"data": preflight_service.get_preflight(
+            request.app.state.settings.database_url, pair_id, account_address,
+            config_revision, _owner(request),
+        )}
+    except adjustments_service.AdjustmentError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except (pairs_service.PairsConfigError, accounts_service.PairAccountError) as exc:
+        raise _account_error(exc) from exc
+    except Exception as exc:
+        logger.exception("adjustment preflight unavailable")
+        raise HTTPException(503, "下单前检查暂不可用；禁止增仓，请稍后重新检查") from exc
 
 
 @router.post("/hyperliquid/pairs/{pair_id}/leverage/browser-prepare")

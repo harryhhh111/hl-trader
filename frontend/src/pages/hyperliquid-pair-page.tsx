@@ -7,7 +7,7 @@ import { EChartsWrapper } from '@/components/charts/echarts-wrapper';
 import { AccountSettings } from '@/components/hyperliquid/account-settings';
 import { PositionAdjustment } from '@/components/hyperliquid/position-adjustment';
 import { PairRiskControls } from '@/components/hyperliquid/pair-risk-controls';
-import { LeverageAdjustment } from '@/components/hyperliquid/leverage-adjustment';
+import { PairOrderPreflight } from '@/components/hyperliquid/order-preflight';
 import { TradeHistory } from '@/components/hyperliquid/trade-history';
 import { PageHeader } from '@/components/layout/page-header';
 import {
@@ -131,6 +131,7 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
       </Card>
 
       <PairRiskControls descriptor={descriptor} configRevision={configRevision} />
+      <PairOrderPreflight descriptor={descriptor} configRevision={configRevision} />
 
       <BlockFrame title={`${first} / ${second} 比价`} block={ratio} hint="UTC 已收盘日线；缺失日期断线；30/90 天切换。">
         <RatioChart points={ratio.points} coins={descriptor.coins} />
@@ -146,12 +147,12 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
         {positions.items == null
           ? <p className="text-muted-foreground">持仓不可用</p>
           : positions.items.length === 0
-            ? <div className="space-y-3"><p className="text-muted-foreground">无持仓（已确认空仓）；可在下单前设置合约杠杆。</p><div className="flex flex-wrap gap-2">{descriptor.coins.map((coin) => <LeverageAdjustment key={coin} descriptor={descriptor} configRevision={configRevision} coin={coin} />)}</div></div>
+            ? <p className="text-muted-foreground">无持仓（已确认空仓）；可在上方下单前检查中设置合约杠杆。</p>
             : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
                   <thead><tr className="text-left text-xs text-muted-foreground">
-                    {['合约', '方向', '数量', '开仓均价', '标记价', '名义', '未实现盈亏', '保证金模式', '杠杆 / 上限', '保证金占用', '强平价', '操作'].map((h) => <th key={h} className="py-1 pr-4">{h}</th>)}
+                    {['合约', '方向', '数量', '开仓均价', '标记价', '名义', '未实现盈亏', '保证金模式', '杠杆 / 市场上限（应用≤3x）', '保证金占用', '强平价'].map((h) => <th key={h} className="py-1 pr-4">{h}</th>)}
                   </tr></thead>
                   <tbody>{positions.items.map((p, i) => (
                     <tr key={i} className="border-t">
@@ -166,7 +167,6 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
                       <td className="pr-4 font-mono">{p.leverage == null ? '—' : `${p.leverage}x`} / {p.max_leverage == null ? '—' : `${p.max_leverage}x`}</td>
                       <td className="pr-4 font-mono">{dash(p.margin_used)}</td>
                       <td className="pr-4 font-mono">{dash(p.liquidation_px)}</td>
-                      <td className="pr-4"><LeverageAdjustment descriptor={descriptor} configRevision={configRevision} coin={p.coin} currentLeverage={p.leverage} currentMode={p.margin_mode} maxLeverage={p.max_leverage} /></td>
                     </tr>
                   ))}</tbody>
                 </table>

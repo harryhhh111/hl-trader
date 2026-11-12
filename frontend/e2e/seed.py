@@ -92,6 +92,11 @@ trader.write_text(
     f"path = {str(ROOT / 'tests/fixtures/hyperliquid/v2_snapshot_hype_btc.json')!r} if pair == 'hype-btc' else {str(ROOT / 'tests/fixtures/hyperliquid/v2_snapshot_nbis_crwv.json')!r}\n"
     "data = json.load(open(path))\n"
     "data['config_revision'] = revision\n"
+    "if 'adjust-preflight' in sys.argv:\n"
+    "    from datetime import datetime, timezone\n"
+    "    address = sys.argv[sys.argv.index('--address') + 1]\n"
+    "    print(json.dumps({'schema_version': 1, 'pair_id': pair, 'network': 'mainnet', 'config_revision': revision, 'account_address': address, 'queried_at': datetime.now(timezone.utc).isoformat(), 'policy_max_leverage': 3, 'ready_for_increase': True, 'legs': [{'coin': coin, 'margin_mode': 'cross', 'leverage': 3, 'market_max_leverage': 5, 'cross_available': True, 'ready_for_increase': True, 'diagnostics': []} for coin in data['pair']['coins']]}))\n"
+    "    raise SystemExit(0)\n"
     "if pair == 'hype-btc': data['blocks']['unlocks']['anchors'] = {}\n"
     "print(json.dumps(data))\n",
     encoding="utf-8",

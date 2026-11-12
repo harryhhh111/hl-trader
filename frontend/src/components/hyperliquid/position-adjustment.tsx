@@ -17,6 +17,7 @@ import {
 } from '@/lib/wallet';
 import { accountShort, dash, formatTime, slippageLabel } from './format';
 import { refreshHyperliquid } from './queries';
+import { OrderPreflightPanel, preflightQueryOptions } from './order-preflight';
 
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail || error.message : walletErrorText(error);
 const actionLabel = (action: string, reduceOnly: boolean) => {
@@ -80,6 +81,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
   const browser = useMutation({
     mutationFn: async () => {
       if (!signer) throw new Error(signerMode === 'local' ? '请先导入 API Wallet' : '请先连接 API Wallet');
+      await requirePreflight();
       setWalletError('');
       setProgress('正在生成待签名订单…');
       const prepared = await hyperliquidPairsApi.prepareBrowserAdjustment(descriptor.id, {
@@ -122,6 +124,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
       if (!report?.request_id || report.wallet_version == null) {
         throw new Error('托管调仓预览身份缺失，请重新预览');
       }
+      await requirePreflight();
       setWalletError('');
       setProgress('正在使用托管 API Wallet 执行并核对成交…');
       const request = {
@@ -248,6 +251,26 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     && ['preview', 'prepared'].includes(report.status)
     && quoteQuery.data != null
     && report.legs.some((leg, index) => quoteQuery.data.legs[index]?.mid !== leg.mid_px);
+  const preflight = useQuery({
+    ...preflightQueryOptions(descriptor, configRevision),
+    enabled: open && account != null && !busy,
+  });
+  const needsIncrease = report == null || report.legs.some((leg) => !leg.reduce_only && Number(leg.order_qty) > 0);
+  const policyBlocked = needsIncrease && (preflight.isPending || preflight.isError || !preflight.data?.ready_for_increase);
+  const requirePreflight = async () => {
+    if (!needsIncrease) return;
+    const latest = await preflight.refetch();
+    if (latest.isError || !latest.data?.ready_for_increase) {
+      throw new Error('下单前检查未通过：请确认两腿均使用支持的模式且杠杆不超过 3x，再重新预览。');
+    }
+  };
+  const settingsChanged = () => {
+    if (isExecutionResult) return;
+    setReport(null);
+    setConfirmation('');
+    setWalletError('保证金或杠杆已修改，请重新预览调仓差额。');
+    preview.reset();
+  };
 
   return (
     <>
@@ -312,6 +335,9 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
             </form>
           )}
           {preview.isError && <p className="text-sm text-rose-600" role="alert">预览失败：{errorText(preview.error)}</p>}
+          {account != null && <OrderPreflightPanel descriptor={descriptor} configRevision={configRevision}
+            data={preflight.data} error={preflight.error} loading={preflight.isPending} refreshing={preflight.isFetching}
+            busy={busy} onRefresh={() => void preflight.refetch()} onSettingsChanged={settingsChanged} />}
 
           <section aria-label="实时盘口" className="rounded-md border p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -386,7 +412,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                         <input aria-label="确认目标金额" className="w-full rounded-md border bg-background px-3 py-2 font-mono sm:w-52"
                           value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={busy} required />
                       </label>
-                      <Button type="button" variant="destructive" disabled={busy || stalePreview || confirmation.trim() !== target.trim()} onClick={() => managed.mutate()}>
+                      <Button type="button" variant="destructive" disabled={busy || stalePreview || policyBlocked || confirmation.trim() !== target.trim()} onClick={() => managed.mutate()}>
                         {managed.isPending || report.managed_status === 'running' ? '正在执行或查询原请求…' : '使用托管钱包下单'}
                       </Button>
                     </div>
@@ -415,7 +441,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                       <p className="text-sm text-amber-600">{signerMode === 'local'
                         ? '本地模式会逐腿计算签名，不弹出钱包确认；点击签名按钮前请核对订单。全部签名完成前不会提交任何订单。'
                         : '钱包将逐腿显示订单签名，可能弹窗一到两次。全部签名完成前不会提交任何订单。'}</p>
-                      <Button type="button" variant="destructive" disabled={busy || stalePreview} onClick={() => browser.mutate()}>
+                      <Button type="button" variant="destructive" disabled={busy || stalePreview || policyBlocked} onClick={() => browser.mutate()}>
                         {browser.isPending ? '正在签名或提交…'
                           : report.status === 'prepared' ? '重新生成并签名'
                           : signerMode === 'local' ? '本地签名并下单' : '调起钱包签名并下单'}

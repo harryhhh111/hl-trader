@@ -418,3 +418,22 @@ export interface HlTradeHistory {
   has_more: boolean;
   skipped_reports: number;
 }
+export interface HlOrderPreflight {
+  schema_version: 1;
+  pair_id: string;
+  network: string;
+  config_revision: string;
+  account_address: string;
+  queried_at: string;
+  policy_max_leverage: number;
+  ready_for_increase: boolean;
+  legs: {
+    coin: string;
+    margin_mode: 'cross' | 'isolated';
+    leverage: number;
+    market_max_leverage: number;
+    cross_available: boolean;
+    ready_for_increase: boolean;
+    diagnostics: string[];
+  }[];
+}

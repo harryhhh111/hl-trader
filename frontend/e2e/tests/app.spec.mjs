@@ -140,7 +140,7 @@ test("单合约杠杆展示并经人工确认完成托管调整", async ({ page 
   await dialog.getByLabel("保证金模式").selectOption("isolated");
   await dialog.getByLabel("确认杠杆调整").fill("xyz:NBIS isolated 2x");
   await dialog.getByRole("button", { name: "确认调整杠杆", exact: true }).click();
-  await expect(dialog.getByText("杠杆已调整并核对", { exact: true })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
   expect(requestBody.leverage).toBe(2);
   expect(requestBody.margin_mode).toBe("isolated");
   expect(requestBody.confirmation).toBe("xyz:NBIS isolated 2x");

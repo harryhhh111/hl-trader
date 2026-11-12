@@ -15,13 +15,16 @@ import { refreshHyperliquid } from './queries';
 
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail || error.message : walletErrorText(error);
 
-export function LeverageAdjustment({ descriptor, configRevision, coin, currentLeverage = null, currentMode = 'cross', maxLeverage = null }: {
+export function LeverageAdjustment({ descriptor, configRevision, coin, currentLeverage = null, currentMode = 'cross', maxLeverage = null, crossAvailable = true, onSettingsChanged, disabled = false }: {
   descriptor: HlPairDescriptor;
   configRevision: string;
   coin: string;
   currentLeverage?: number | null;
   currentMode?: 'cross' | 'isolated' | null;
   maxLeverage?: number | null;
+  crossAvailable?: boolean;
+  onSettingsChanged?: () => void;
+  disabled?: boolean;
 }) {
   const qc = useQueryClient();
   const account = descriptor.account_address;
@@ -47,7 +50,8 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
   });
   const signer = mode === 'local' ? localWallet?.address.toLowerCase() ?? null : mode === 'injected' ? injectedSigner : null;
   const numericLeverage = Number(leverage);
-  const valid = Number.isInteger(numericLeverage) && numericLeverage >= 1 && (maxLeverage == null || numericLeverage <= maxLeverage);
+  const limit = Math.min(3, maxLeverage ?? 3);
+  const valid = Number.isInteger(numericLeverage) && numericLeverage >= 1 && numericLeverage <= limit && (crossAvailable || marginMode === 'isolated');
   const body = {
     account_address: account ?? '', config_revision: configRevision, coin,
     leverage: numericLeverage, margin_mode: marginMode,
@@ -57,6 +61,11 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
   const finished = async (result: HlLeverageReport) => {
     setReport(result);
     clearLocal();
+    await qc.invalidateQueries({ queryKey: ['hl-preflight'] });
+    if (result.status === 'succeeded') {
+      onSettingsChanged?.();
+      setOpen(false);
+    }
     if (result.managed_status !== 'running') await refreshHyperliquid(qc, descriptor.id);
   };
   const browser = useMutation({
@@ -94,8 +103,8 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
     const timer = window.setInterval(() => {
       void hyperliquidPairsApi.managedLeverage(descriptor.id, report.request_id!).then(async (result) => {
         if (!active) return;
-        setReport(result);
-        if (result.managed_status !== 'running') await refreshHyperliquid(qc, descriptor.id);
+        if (result.managed_status !== 'running') await finished(result);
+        else setReport(result);
       }).catch((cause) => { if (active) setError(errorText(cause)); });
     }, 2000);
     return () => { active = false; window.clearInterval(timer); };
@@ -108,7 +117,7 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
     setError('');
     setProgress('');
     clearLocal();
-  }, [descriptor.id, account, coin, currentLeverage, currentMode]);
+  }, [descriptor.id, account, coin, configRevision]);
   const connect = async () => {
     setWalletBusy(true);
     setError('');
@@ -138,8 +147,10 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
 
   return (
     <>
-      <Button type="button" size="sm" variant="outline" aria-label={`调整 ${coin} 杠杆`} onClick={() => {
+      <Button type="button" size="sm" variant="outline" disabled={disabled} aria-label={`调整 ${coin} 杠杆`} onClick={() => {
         setRequestId(crypto.randomUUID());
+        setLeverage(String(Math.min(currentLeverage ?? 3, limit)));
+        setMarginMode(crossAvailable ? 'cross' : 'isolated');
         setReport(null);
         setConfirmation('');
         setError('');
@@ -147,11 +158,12 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
       }}><Gauge className="mr-1 h-3.5 w-3.5" />调杠杆</Button>
       <Dialog open={open} onOpenChange={(next) => { if (!busy || next) setOpen(next); if (!next) clearLocal(); }} title={`调整 ${coin} 杠杆`} className="max-w-xl">
         <div className="space-y-4 text-sm">
-          <p className="text-muted-foreground">逐合约设置保证金模式和整数杠杆。不会改变另一腿，也不会自动下单；提交后重新读取交易所状态确认。</p>
+          <p className="text-muted-foreground">逐合约设置保证金模式和整数杠杆，提交后重新读取交易所状态确认。同账户其他 pair 若共用该合约，也会受到影响。</p>
           <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-3">
-            <span>当前杠杆 <span className="font-mono">{currentLeverage == null ? '—' : `${currentLeverage}x`}</span></span>
+            <span>当前 {currentMode ?? '—'} <span className="font-mono">{currentLeverage == null ? '—' : `${currentLeverage}x`}</span></span>
             <span>市场上限 <span className="font-mono">{maxLeverage == null ? '以交易所实时校验为准' : `${maxLeverage}x`}</span></span>
           </div>
+          <p className="text-amber-600">应用上限 3x；支持全仓的合约须使用 Cross 才能增仓。{!crossAvailable && '该市场仅支持逐仓，允许作为例外。'}</p>
           <div className="flex flex-wrap gap-2" aria-label="签名方式">
             {(['managed', 'local', 'injected'] as const).map((item) => <Button key={item} type="button" size="sm" variant={mode === item ? 'default' : 'outline'} disabled={busy} onClick={() => { setMode(item); setReport(null); setError(''); }}>
               {item === 'managed' ? '托管 API Wallet' : item === 'local' ? '浏览器本地私钥' : '浏览器扩展钱包'}
@@ -159,15 +171,15 @@ export function LeverageAdjustment({ descriptor, configRevision, coin, currentLe
           </div>
           <form className="grid grid-cols-[1fr_1fr] gap-3" onSubmit={(event) => event.preventDefault()}>
             <label className="grid gap-1">目标杠杆
-              <input aria-label="目标杠杆" className="rounded-md border bg-background px-3 py-2 font-mono" type="number" min="1" max={maxLeverage ?? undefined} step="1" value={leverage} disabled={busy} onChange={(event) => { setLeverage(event.target.value); setReport(null); }} required />
+              <input aria-label="目标杠杆" className="rounded-md border bg-background px-3 py-2 font-mono" type="number" min="1" max={limit} step="1" value={leverage} disabled={busy} onChange={(event) => { setLeverage(event.target.value); setReport(null); }} required />
             </label>
             <label className="grid gap-1">保证金模式
               <select aria-label="保证金模式" className="rounded-md border bg-background px-3 py-2" value={marginMode} disabled={busy} onChange={(event) => { setMarginMode(event.target.value as 'cross' | 'isolated'); setReport(null); }}>
-                <option value="cross">全仓 cross</option><option value="isolated">逐仓 isolated</option>
+                <option value="cross" disabled={!crossAvailable}>全仓 cross（优先）</option><option value="isolated">逐仓 isolated</option>
               </select>
             </label>
           </form>
-          {!valid && <p role="alert" className="text-rose-600">请输入正整数{maxLeverage == null ? '' : `，且不能超过 ${maxLeverage}x`}。</p>}
+          {!valid && <p role="alert" className="text-rose-600">请输入 1 到 {limit} 的整数杠杆，并选择市场支持的模式。</p>}
           {mode === 'managed' && wallet.isSuccess && !wallet.data.configured && <p className="text-amber-600">请先在账户配置中添加托管 API Wallet。</p>}
           {mode === 'managed' && valid && <div className="space-y-2">
             <label className="grid gap-1">输入 <span className="font-mono">{targetText}</span> 确认

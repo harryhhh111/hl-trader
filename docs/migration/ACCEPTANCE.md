@@ -1,6 +1,8 @@
-# 独立应用迁移验收证据
+# 独立应用迁移验收证据（2026-10-28/29 基线）
 
 本记录区分代码实现、离线回归、真实 DB、真实浏览器、干净环境和外部验收。未执行项目不写成通过。
+
+> 2026-11-11 状态说明：本文的测试数量、截图和“未执行”列表只覆盖原 A–H 迁移交付。后续功能与部署见[当前状态](../PROJECT_STATUS.md)；[托管钱包文档](../HYPERLIQUID_MANAGED_API_WALLET_PLAN.md)另有 2026-11-04 的本机 Docker 部署记录。该后续记录不改变本文原始证据，也不证明当前 HEAD 已部署或已通过真实交易验收。
 
 ## 1. 代码与离线证据
 
@@ -12,7 +14,7 @@
 
 ## 2. 真实 PostgreSQL 集成
 
-各阶段使用 `initdb` 新建的本机临时实例，显式注入 `HL_APP_TEST_DATABASE_URL`，测试只清理自身 schema/角色。最新全套结果：43 passed，137 deselected，无 skip 隐藏 DB 项。最终复核另以 `initdb --no-locale` 的 SQL_ASCII 实例跑通同一全套，验证所有应用连接的 UTF-8 客户端编码。
+各阶段使用 `initdb` 新建的本机临时实例，显式注入 `HL_APP_TEST_DATABASE_URL`，测试只清理自身 schema/角色。当次最终全套结果：43 passed，137 deselected，无 skip 隐藏 DB 项。最终复核另以 `initdb --no-locale` 的 SQL_ASCII 实例跑通同一全套，验证所有应用连接的 UTF-8 客户端编码。
 
 覆盖：迁移与权限、Web/worker 生命周期锁、认证 epoch/轮换/并发、三市场行情、公告 revision/多公司关联、来源失败与恢复、四进程 SEC gate、AI 失败、full 导入/幂等/回滚、baseline/activate、回退差异和参考源三方恢复。
 
@@ -50,7 +52,7 @@ F 的 CLI 全链路 `migrate→dry-run→apply→baseline→activate→maintenan
 
 临时源恢复演练已完成：理由/停用/revision/行情变化→回退 insert/update/delete→参考恢复→幂等/冲突拒绝。stock_data agent 的正式恢复适配和生产 schema 兼容性尚未验收，因此正式切换不就绪。
 
-## 6. 未执行/阻碍
+## 6. 当次未执行/阻碍
 
 - 真实 Hyperliquid 公开账户、新服务器只读对照：未执行。
 - US/A/HK 真实行情来源可达性：未执行。

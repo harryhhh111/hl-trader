@@ -790,21 +790,13 @@ async fn plan_open(
                 market.name
             )));
         }
-        if market.isolated_margin {
-            // 市场元数据 onlyIsolated（交易所层面禁止全仓，如测试网 HYPE strictIsolated）：
-            // 已拍板接受逐仓，自担单腿独立强平风险，不再检查/设置 cross_margin。
-            warnings.push(format!(
-                "警告: {} 市场仅支持逐仓(isolated),接受单腿独立强平风险(保证金例外,见 PHASE2_PLAN)",
-                market.name
-            ));
-            continue;
+        let settings = crate::preflight::read_leg(adapter, user, market)
+            .await
+            .map_err(|error| PairError::Refused(error.to_string()))?;
+        if !settings.ready_for_increase {
+            return Err(PairError::Refused(settings.diagnostics.join("；")));
         }
-        if !adapter.cross_margin(user, &market.name).await? {
-            return Err(PairError::Refused(format!(
-                "{} 未配置全仓保证金模式",
-                market.name
-            )));
-        }
+        warnings.extend(settings.diagnostics);
     }
     let bbo_long = adapter.bbo(LONG_COIN).await?;
     let bbo_short = adapter.bbo(SHORT_COIN).await?;
@@ -3439,7 +3431,7 @@ mod tests {
             then.respond_with(move |req| {
                 let v: serde_json::Value = serde_json::from_str(&req.body_string()).unwrap();
                 httpmock::HttpMockResponse::builder().status(200).body(serde_json::json!({
-                    "user": v["user"], "coin": v["coin"], "leverage": {"type":"cross", "value":3}
+                    "user": v["user"], "coin": v["coin"], "leverage": {"type": if v["coin"] == "HYPE" { "isolated" } else { "cross" }, "value":3}
                 }).to_string()).build()
             });
         });

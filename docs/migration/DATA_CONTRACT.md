@@ -2,6 +2,8 @@
 
 本合同对应执行方案第 9 节。只允许停写后的 full→空业务库，不实现增量覆盖、CDC 或双向合并。正式源侧导出与恢复工具由 stock_data agent 实现；本仓库提供目标工具、格式、映射和参考演练。
 
+适用范围（2026-11-11 核对）：本文是原迁移工具的 full/baseline/rollback 合同，不是 [stock_data 资讯同步](../STOCK_DATA_NEWS_SYNC_CONTRACT.md)的 bootstrap 或激活前提。下列业务包只覆盖十个列明实体，不包含后续的登录账号、Hyperliquid 托管钱包、执行请求或风险规则；这些资源需要独立的数据库、密钥及回执备份，不能用业务 JSONL 包替代。当前功能状态见[项目总览](../PROJECT_STATUS.md)。
+
 ## 1. 通用包格式
 
 每个包是私有目录，含 `manifest.json`。full/baseline/rollback_snapshot 按下列十个实体各有一个 UTF-8 JSONL 文件，必需实体即使 0 行也必须声明并提供空文件：

@@ -591,6 +591,7 @@ pub async fn run_adjust(
     if !execute {
         return Ok(report);
     }
+    crate::preflight::guard_increase(adapter, request, &report.legs).await?;
     let signer = signer.expect("checked above");
     store.archive()?;
     store.save(&report)?;
@@ -611,6 +612,14 @@ pub async fn run_adjust(
             .map(|(index, _)| index),
     );
     for index in order_indices {
+        if !report.legs[index].reduce_only
+            && let Err(error) =
+                crate::preflight::guard_increase(adapter, request, &report.legs).await
+        {
+            finish_known(&mut report, error.to_string());
+            save_after_write(&store, &report)?;
+            return Ok(report);
+        }
         if let Err(error) = ensure_config_unchanged(request) {
             finish_known(&mut report, error.to_string());
             save_after_write(&store, &report)?;
@@ -849,6 +858,7 @@ pub async fn prepare_browser_adjustment(
             .push("两腿已处于精度允许的目标数量，或差额低于最小下单名义，无需下单".into());
         return Ok(report);
     }
+    crate::preflight::guard_increase(adapter, request, &report.legs).await?;
     store.archive()?;
     for index in 0..report.legs.len() {
         if report.legs[index].order_qty == Decimal::ZERO {
@@ -1054,6 +1064,7 @@ pub async fn submit_browser_adjustment(
             "市场资产 ID 或上市状态已变化，请重新预览并签名".into(),
         ));
     }
+    crate::preflight::guard_increase(adapter, request, &report.legs).await?;
     report.signing_requests.clear();
 
     let mut execution_order: Vec<usize> = order_indices
@@ -1068,6 +1079,14 @@ pub async fn submit_browser_adjustment(
             .filter(|index| !report.legs[*index].reduce_only),
     );
     for index in execution_order {
+        if !report.legs[index].reduce_only
+            && let Err(error) =
+                crate::preflight::guard_increase(adapter, request, &report.legs).await
+        {
+            finish_known(&mut report, error.to_string());
+            save_after_write(&store, &report)?;
+            return Ok(report);
+        }
         if let Err(error) = ensure_config_unchanged(request) {
             finish_known(&mut report, error.to_string());
             save_after_write(&store, &report)?;
@@ -1183,6 +1202,7 @@ mod tests {
     use httpmock::MockServer;
     use std::str::FromStr;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
     const USER: &str = "0x7f2120f612b78d579197762196b8a202ab654096";
@@ -1192,6 +1212,9 @@ mod tests {
         pair: DashboardPair,
         path: PathBuf,
         state_dir: PathBuf,
+        leverage: Arc<AtomicUsize>,
+        margin_mode: Arc<Mutex<String>>,
+        settings_reads: Arc<AtomicUsize>,
     }
 
     impl Fixture {
@@ -1259,7 +1282,7 @@ mod tests {
         });
     }
 
-    fn mock_markets(server: &MockServer) {
+    fn mock_markets(server: &MockServer, margin_mode: Option<&str>) {
         server.mock(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/info")
@@ -1283,15 +1306,13 @@ mod tests {
                 .path("/info")
                 .body_includes(r#""type":"meta""#)
                 .body_includes(r#""dex":"xyz""#);
-            then.status(200).body(
-                r#"{
-                "universe": [
-                    {"szDecimals":2,"name":"xyz:NBIS","maxLeverage":5,"onlyIsolated":false},
-                    {"szDecimals":2,"name":"xyz:CRWV","maxLeverage":5,"onlyIsolated":false}
-                ],
-                "collateralToken":0
-            }"#,
-            );
+            then.status(200).json_body(serde_json::json!({
+                "universe": (["xyz:NBIS", "xyz:CRWV"].map(|coin| serde_json::json!({
+                    "szDecimals": 2, "name": coin, "maxLeverage": 5,
+                    "onlyIsolated": margin_mode == Some("onlyIsolated"),
+                    "marginMode": margin_mode.filter(|mode| *mode != "onlyIsolated")
+                }))), "collateralToken": 0
+            }));
         });
         for (coin, bid, ask) in [("xyz:NBIS", "9.9", "10.1"), ("xyz:CRWV", "49.75", "50.25")] {
             server.mock(|when, then| {
@@ -1308,9 +1329,35 @@ mod tests {
     }
 
     async fn setup(accounts: Vec<String>) -> (MockServer, Fixture) {
+        setup_market_mode(accounts, None).await
+    }
+
+    async fn setup_market_mode(
+        accounts: Vec<String>,
+        margin_mode: Option<&str>,
+    ) -> (MockServer, Fixture) {
         let server = MockServer::start_async().await;
-        mock_markets(&server);
+        mock_markets(&server, margin_mode);
         mock_accounts(&server, accounts);
+        let leverage = Arc::new(AtomicUsize::new(3));
+        let margin_mode = Arc::new(Mutex::new("cross".to_string()));
+        let settings_reads = Arc::new(AtomicUsize::new(0));
+        let (value, mode, reads) = (
+            leverage.clone(),
+            margin_mode.clone(),
+            settings_reads.clone(),
+        );
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/info").body_includes("activeAssetData");
+            then.respond_with(move |req| {
+                reads.fetch_add(1, Ordering::SeqCst);
+                let v: serde_json::Value = serde_json::from_str(&req.body_string()).unwrap();
+                httpmock::HttpMockResponse::builder().status(200).body(serde_json::json!({
+                    "user": v["user"], "coin": v["coin"],
+                    "leverage": {"type": mode.lock().unwrap().clone(), "value": value.load(Ordering::SeqCst)}
+                }).to_string()).build()
+            });
+        });
         let dir = std::env::temp_dir().join(format!(
             "hltrader-adjust-{}-{}",
             std::process::id(),
@@ -1337,6 +1384,9 @@ mod tests {
                 pair,
                 path: path.clone(),
                 state_dir: dir.join("state"),
+                leverage,
+                margin_mode,
+                settings_reads,
             },
         )
     }
@@ -1350,6 +1400,144 @@ mod tests {
 
     fn rejected() -> &'static str {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"rejected"}]}}}"#
+    }
+
+    #[tokio::test]
+    async fn unsafe_settings_block_execution_and_browser_prepare_without_exchange() {
+        for (value, mode) in [(4, "cross"), (3, "isolated"), (0, "cross")] {
+            let (server, fixture) = setup(vec![account("0", "0")]).await;
+            fixture.leverage.store(value, Ordering::SeqCst);
+            *fixture.margin_mode.lock().unwrap() = mode.into();
+            let exchange = server.mock(|when, then| {
+                when.method(httpmock::Method::POST).path("/exchange");
+                then.status(500);
+            });
+            let adapter = Adapter::with_base_url(&server.base_url());
+            assert!(
+                run_adjust(&adapter, Some(&signer()), &fixture.request(), true)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                prepare_browser_adjustment(&adapter, &fixture.request(), signer().address())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(exchange.calls(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn isolated_only_modes_allow_exception_but_still_enforce_three_x() {
+        for mode in ["onlyIsolated", "strictIsolated", "noCross"] {
+            let (server, fixture) = setup_market_mode(vec![account("0", "0")], Some(mode)).await;
+            *fixture.margin_mode.lock().unwrap() = "isolated".into();
+            let adapter = Adapter::with_base_url(&server.base_url());
+            let check = || {
+                crate::preflight::collect(
+                    &adapter,
+                    &fixture.pair,
+                    USER.parse().unwrap(),
+                    &fixture.config.revision,
+                )
+            };
+            let report = check().await.unwrap();
+            assert!(report.ready_for_increase, "{mode}");
+            assert!(report.legs.iter().all(|leg| !leg.cross_available));
+            fixture.leverage.store(4, Ordering::SeqCst);
+            assert!(!check().await.unwrap().ready_for_increase);
+            fixture.leverage.store(3, Ordering::SeqCst);
+            *fixture.margin_mode.lock().unwrap() = "cross".into();
+            assert!(!check().await.unwrap().ready_for_increase);
+        }
+    }
+
+    #[tokio::test]
+    async fn settings_changed_after_signing_block_browser_submit() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let adapter = Adapter::with_base_url(&server.base_url());
+        let wallet = signer();
+        let prepared = prepare_browser_adjustment(&adapter, &fixture.request(), wallet.address())
+            .await
+            .unwrap();
+        fixture.leverage.store(4, Ordering::SeqCst);
+        let exchange = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/exchange");
+            then.status(500);
+        });
+        let result = submit_browser_adjustment(
+            &adapter,
+            &fixture.request(),
+            wallet.address(),
+            prepared.action_id.as_deref().unwrap(),
+            sign_browser_requests(&prepared, &wallet),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(exchange.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn settings_changed_after_first_fill_stop_the_next_increase() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let leverage = fixture.leverage.clone();
+        let first = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#);
+            then.respond_with(move |_| {
+                leverage.store(4, Ordering::SeqCst);
+                httpmock::HttpMockResponse::builder()
+                    .status(200)
+                    .body(filled(1, "200", "10"))
+                    .build()
+            });
+        });
+        let second = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#);
+            then.status(500);
+        });
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &fixture.request(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.status, AdjustmentStatus::Incomplete);
+        assert_eq!(report.legs[0].status, AdjustmentLegStatus::Filled);
+        assert_eq!(first.calls(), 1);
+        assert_eq!(second.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn close_remains_available_when_settings_are_unreadable() {
+        let (server, fixture) = setup(vec![account("10", "-2"), account("0", "0")]).await;
+        fixture.leverage.store(0, Ordering::SeqCst);
+        for (asset, qty, px) in [(110000, "10", "10"), (110001, "2", "50")] {
+            server.mock(|when, then| {
+                when.method(httpmock::Method::POST)
+                    .path("/exchange")
+                    .body_includes(format!(r#""a":{asset}"#))
+                    .body_includes(r#""r":true"#);
+                then.status(200).body(filled(asset, qty, px));
+            });
+        }
+        let mut request = fixture.request();
+        request.target_notional = Decimal::ZERO;
+        let result = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &request,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, AdjustmentStatus::Succeeded);
+        assert_eq!(fixture.settings_reads.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

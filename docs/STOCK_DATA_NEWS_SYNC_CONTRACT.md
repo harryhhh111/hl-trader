@@ -2,6 +2,8 @@
 
 状态：开发合同，目标消费端尚未实现，真实联调尚未执行。
 
+状态核对：2026-11-11，目标侧代码基准为 `87ffcd8`；[当前项目状态](PROJECT_STATUS.md)另列已实现功能。下列源侧提交、远端版本和字段缺口属于合同编写时的观察，本次未复查 stock_data 仓库或运行服务，不能当作源侧当前发布结论。
+
 ## 1. 目的与基线
 
 本片只实现一个接口链路：`stock_data` 作为既有公告/媒体资讯的上游，`hl-trader` 通过专用认证 API 增量读取事件，写入自己的 PostgreSQL，并由现有资讯页面读取。不得因此开放源数据库、导入源仓库运行代码或把浏览器请求转发到源站。
@@ -10,7 +12,7 @@
 
 - `hl-trader`：`9269285cafab5fd0c55324b606b598ab9919a948`。
 - `stock_data` 本地 HEAD：`451f5eb`，已包含同步 API；其 `origin/main` 仍为 `38dfeb45f624ba5275522741d5c2601c2e4fcf9d`，因此该接口尚未由远端发布。
-- 当前源侧 `NewsSource` 尚无本文要求的 `allowed_domain`；源侧 agent 须补充 DTO、payload、fixture 和回归后再联调。
+- 合同编写时源侧 `NewsSource` 尚无本文要求的 `allowed_domain`；联调前须由源侧 agent 核对 DTO、payload、fixture 和回归是否已补齐。
 
 源侧实际实现位置：
 

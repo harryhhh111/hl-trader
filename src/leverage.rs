@@ -134,6 +134,11 @@ fn validate_request(
     request: &LeverageRequest<'_>,
     expected_signer: Address,
 ) -> Result<(), AdjustError> {
+    if request.leverage > crate::preflight::MAX_LEVERAGE {
+        return Err(AdjustError::Refused(
+            "本应用杠杆上限为 3x，请设置 1 到 3 倍".into(),
+        ));
+    }
     if expected_signer == Address::ZERO || expected_signer == request.account {
         return Err(AdjustError::Refused(
             "必须使用与原交易账户不同的 API Wallet 地址".into(),
@@ -173,7 +178,7 @@ async fn market_for(
             request.leverage, market.max_leverage
         )));
     }
-    if request.margin_mode == "cross" && market.isolated_margin {
+    if request.margin_mode == "cross" && !crate::preflight::cross_available(&market) {
         return Err(AdjustError::Refused("该市场只允许逐仓模式".into()));
     }
     Ok(market)
@@ -204,7 +209,7 @@ fn leverage_value(value: Decimal) -> Result<u32, AdjustError> {
         )
         .into());
     }
-    value.to_string().parse().map_err(|_| {
+    value.normalize().to_string().parse().map_err(|_| {
         crate::hyperliquid::AdapterError::BadResponse("交易所当前杠杆超出支持范围".into()).into()
     })
 }
@@ -612,7 +617,7 @@ mod tests {
         });
         let adapter = Adapter::with_base_url(&server.base_url());
         let signer = wallet();
-        let error = prepare(&adapter, &fixture.request(6), signer.address(), None)
+        let error = prepare(&adapter, &fixture.request(4), signer.address(), None)
             .await
             .unwrap_err();
         assert!(matches!(error, AdjustError::Refused(_)));

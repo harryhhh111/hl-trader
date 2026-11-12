@@ -88,6 +88,9 @@ export const hyperliquidPairsApi = {
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/risk`,
     { method: "PUT", body: JSON.stringify(body) },
   ),
+  adjustmentPreflight: (pairId: string, account: string, revision: string) => apiFetch<import("@/lib/types/hyperliquid").HlOrderPreflight>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustment-preflight?${new URLSearchParams({ account_address: account, config_revision: revision })}`,
+  ),
   prepareLeverage: (pairId: string, body: {
     account_address: string;
     config_revision: string;

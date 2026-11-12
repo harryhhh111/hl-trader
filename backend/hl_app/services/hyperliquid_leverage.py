@@ -22,8 +22,8 @@ from .process import communicate_bounded
 def _validated(descriptor: dict, account: str, coin: str, leverage: int, margin_mode: str) -> None:
     if coin not in descriptor["coins"]:
         raise wallets.WalletError(422, "合约不属于当前 pair")
-    if type(leverage) is not int or leverage < 1:
-        raise wallets.WalletError(422, "杠杆必须是正整数")
+    if type(leverage) is not int or not 1 <= leverage <= 3:
+        raise wallets.WalletError(422, "杠杆必须是 1 到 3 的正整数，本应用上限为 3x")
     if margin_mode not in {"cross", "isolated"}:
         raise wallets.WalletError(422, "保证金模式只支持 cross 或 isolated")
 

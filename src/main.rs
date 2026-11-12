@@ -10,6 +10,7 @@ mod hyperliquid;
 mod intel;
 mod leverage;
 mod pair;
+mod preflight;
 mod receipt;
 mod snapshot;
 mod write_lock;
@@ -204,6 +205,15 @@ enum Commands {
         /// JSON 数组：[{"leg_index":0,"signature":"0x..."}]。
         #[arg(long)]
         signatures: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 读取当前账户两腿保证金和杠杆，检查 cross 优先和最多 3x；只读。
+    AdjustPreflight {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
         #[arg(long, required = true)]
         json: bool,
     },
@@ -404,6 +414,9 @@ async fn main() -> ExitCode {
                 signatures,
             )
             .await
+        }
+        Commands::AdjustPreflight { pair, address, .. } => {
+            cmd_adjust_preflight(&config_path, &pair, &address).await
         }
         Commands::LeveragePrepare {
             pair,
@@ -689,6 +702,16 @@ async fn cmd_order(
     if !execute {
         println!("dry-run: 未加载私钥、未签名、未发送。确认无误后加 --execute 显式提交。");
         return ExitCode::from(EXIT_OK);
+    }
+
+    let account = match cfg.account_address() {
+        Ok(account) => account,
+        Err(error) => return usage_err(error),
+    };
+    match preflight::read_leg(&adapter, account, market).await {
+        Ok(settings) if settings.ready_for_increase => {}
+        Ok(settings) => return usage_err(settings.diagnostics.join("；")),
+        Err(error) => return runtime_err(error),
     }
 
     let (signer, _writer_guard) = match prepare_writer(&cfg) {
@@ -1123,6 +1146,43 @@ fn cmd_api_wallet_address(secret_fd: std::os::fd::RawFd) -> ExitCode {
             EXIT_OK.into()
         }
         Err(error) => usage_err(format!("API Wallet 私钥加载被拒绝: {error}")),
+    }
+}
+
+async fn cmd_adjust_preflight(
+    config_path: &std::path::Path,
+    pair_id: &str,
+    address: &str,
+) -> ExitCode {
+    let config = match dashboard::config::load(config_path) {
+        Ok(config) => config,
+        Err(error) => return usage_err(format!("pair 配置错误: {error}")),
+    };
+    let pair = match config.enabled_pair(pair_id) {
+        Some(pair) => pair,
+        None => return usage_err(format!("未知或停用的 pair: {pair_id}")),
+    };
+    let account = match address.parse::<Address>() {
+        Ok(account) if account != Address::ZERO => account,
+        _ => return usage_err("账户地址必须是合法非零地址"),
+    };
+    let adapter = Adapter::for_network(pair.descriptor.network);
+    match preflight::collect(&adapter, pair, account, &config.revision).await {
+        Ok(report) => {
+            if dashboard::config::revision_at(config_path).ok().as_deref()
+                != Some(config.revision.as_str())
+            {
+                return usage_err("配置在检查期间发生变化，请刷新页面");
+            }
+            match serde_json::to_string(&report) {
+                Ok(json) => {
+                    println!("{json}");
+                    EXIT_OK.into()
+                }
+                Err(error) => runtime_err(error),
+            }
+        }
+        Err(error) => runtime_err(error),
     }
 }
 
@@ -1629,6 +1689,9 @@ async fn cmd_margin(
     leverage: u32,
     execute: bool,
 ) -> ExitCode {
+    if leverage > preflight::MAX_LEVERAGE {
+        return usage_err("本应用杠杆上限为 3x，请设置 1 到 3 倍");
+    }
     let adapter = Adapter::testnet();
     let perps = match adapter.perp_markets().await {
         Ok(p) => p,
