@@ -327,9 +327,9 @@ def save_wallet(
                     """
                     SELECT 1 FROM hyperliquid_api_wallets
                     WHERE network = %s AND wallet_address = %s AND status = 'active'
-                      AND (pair_id, account_address) <> (%s, %s)
+                      AND account_address <> %s
                     """,
-                    (descriptor["network"], wallet_address, pair_id, account),
+                    (descriptor["network"], wallet_address, account),
                 )
                 if cursor.fetchone() is not None:
                     raise WalletError(409, "该 API Wallet 已被其他交易账户使用")
@@ -339,6 +339,24 @@ def save_wallet(
                 )
                 if cursor.fetchone() is not None:
                     raise WalletError(409, "该 API Wallet 地址已淘汰，不能重新使用")
+                cursor.execute(
+                    """
+                    INSERT INTO hyperliquid_api_wallet_account_bindings (
+                        network, wallet_address, account_address
+                    ) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+                    """,
+                    (descriptor["network"], wallet_address, account),
+                )
+                cursor.execute(
+                    """
+                    SELECT account_address FROM hyperliquid_api_wallet_account_bindings
+                    WHERE network = %s AND wallet_address = %s
+                    """,
+                    (descriptor["network"], wallet_address),
+                )
+                bound = cursor.fetchone()
+                if bound is None or bound["account_address"] != account:
+                    raise WalletError(409, "该 API Wallet 已被其他交易账户使用")
                 _consume_challenge(
                     cursor, challenge_id, session, descriptor, account, operation, version
                 )

@@ -45,18 +45,18 @@ def session() -> SessionInfo:
     return SessionInfo("session-hash", "", 0, datetime.now(timezone.utc) + timedelta(hours=1), "harry@example.com")
 
 
-def challenge(ready, operation="save") -> dict:
+def challenge(ready, operation="save", pair_id="nbis-crwv", account=ADDRESS_LOWER) -> dict:
     return wallets.issue_challenge(
-        ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0], operation, session()
+        ready.runtime_url, pair_id, account, pairs.load_pairs()[0], operation, session()
     )
 
 
-def save(ready, challenge_id: str, address=FIRST_WALLET) -> dict:
+def save(ready, challenge_id: str, address=FIRST_WALLET, pair_id="nbis-crwv", account=ADDRESS_LOWER) -> dict:
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(wallets, "derive_wallet_address", lambda _key: address)
     try:
         return wallets.save_wallet(
-            ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0],
+            ready.runtime_url, pair_id, account, pairs.load_pairs()[0],
             {"challenge_id": challenge_id}, session(),
         )
     finally:
@@ -102,3 +102,47 @@ def test_version_challenge_cannot_overwrite_newer_wallet(ready) -> None:
         save(ready, stale["challenge_id"], FIRST_WALLET)
     current = wallets.get_wallet(ready.runtime_url, "nbis-crwv", ADDRESS_LOWER)
     assert current["wallet_address"] == SECOND_WALLET and current["wallet_version"] == 2
+
+
+def add_active_account(ready, pair_id: str, address: str) -> None:
+    with psycopg2.connect(ready.runtime_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO hyperliquid_pair_accounts (pair_id, label, address, is_active)
+                VALUES (%s, 'shared pair', %s, true)
+                """,
+                (pair_id, address),
+            )
+
+
+def test_same_wallet_can_be_shared_by_same_account_across_pairs(ready) -> None:
+    add_active_account(ready, "hype-btc", ADDRESS_LOWER)
+    save(ready, challenge(ready)["challenge_id"])
+    shared = save(
+        ready,
+        challenge(ready, pair_id="hype-btc")["challenge_id"],
+        pair_id="hype-btc",
+    )
+    assert shared["configured"] is True
+    assert shared["pair_id"] == "hype-btc"
+    with psycopg2.connect(ready.runtime_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM hyperliquid_api_wallets WHERE wallet_address = %s AND status = 'active'",
+                (FIRST_WALLET,),
+            )
+            assert cursor.fetchone() == (2,)
+
+
+def test_same_wallet_is_still_rejected_for_another_account(ready) -> None:
+    other = "0x" + "3" * 40
+    add_active_account(ready, "hype-btc", other)
+    save(ready, challenge(ready)["challenge_id"])
+    with pytest.raises(wallets.WalletError, match="其他交易账户"):
+        save(
+            ready,
+            challenge(ready, pair_id="hype-btc", account=other)["challenge_id"],
+            pair_id="hype-btc",
+            account=other,
+        )

@@ -257,7 +257,7 @@ Web 真实执行由浏览器中的 API Wallet 完成：后端生成每腿 Hyperl
 
 也可在账户配置中添加托管 API Wallet：私钥经浏览器 AES-GCM＋RSA-OAEP 加密传输，后端再以 AES-256-GCM
 密文存入现有 PostgreSQL。保存和执行前通过固定网络官方 `userRole` 实时核对 Agent 归属；一次性 challenge
-和 `wallet_version` 防止重放及覆盖新版本。系统禁止跨账户复用或重新导入已淘汰地址。托管调仓以持久化
+和 `wallet_version` 防止重放及覆盖新版本。同一交易账户可跨 pair 使用同一托管钱包，所有写入按钱包地址共享执行锁；系统仍禁止跨交易账户复用或重新导入已淘汰地址。托管调仓以持久化
 `request_id` 绑定预览、执行与审计，重复请求返回原状态，私钥仅通过 Linux memfd fd 传给 Rust，不写临时文件。
 
 显式 CLI 的 `adjust --execute` 直接要求 `--secret-file` 与 `--state-dir`，不读取 Web 环境开关；旧文件签名 Web API 则需要 `HL_APP_TRADING_ENABLED=true` 和 `HL_APP_AGENT_SECRET_FILE`。

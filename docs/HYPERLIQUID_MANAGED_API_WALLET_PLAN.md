@@ -25,7 +25,7 @@
 - 多签审批、细粒度 RBAC、KMS 或独立签名微服务。
 - 数据加密密钥的在线自动轮换。
 
-每个交易账户和交易进程使用独立 API Wallet。本系统禁止同一网络内跨 pair、跨账户复用签名地址，并永久拒绝重新导入已淘汰或已撤销的地址。Hyperliquid 按签名钱包共享 nonce 状态，pair 级数据库隔离不会改变交易所侧的钱包权限或 nonce 共享。
+同一交易账户可跨 pair 使用同一 API Wallet；本系统禁止跨交易账户复用签名地址，并永久拒绝重新导入已淘汰或已撤销的地址。Hyperliquid 按签名钱包共享 nonce 状态，pair 级数据库隔离不会改变交易所侧的钱包权限或 nonce 共享；Rust 按钱包地址持有跨 pair 写锁，串行化本机签名与提交。
 
 ## 2. 现状与参考
 
@@ -153,7 +153,7 @@ ENC:v1:<data_key_id>:<base64_nonce>:<base64_ciphertext_and_tag>
 - `created_by`、`updated_by`、`created_at`、`updated_at`
 - 主键：`(network, pair_id, account_address)`
 - 约束：地址均为小写、合法、非零，且 `wallet_address <> account_address`
-- 对 `(network, wallet_address)` 建立仅 `active` 记录的唯一索引，禁止系统内跨账户复用
+- migration `011` 新增 `hyperliquid_api_wallet_account_bindings`，以 `(network, wallet_address)` 绑定唯一交易账户：同账户可跨 pair 复用，跨交易账户由绑定主键和保存校验共同拒绝
 
 采用软删除以保留版本递增和审计身份；`deleted` 记录没有私钥密文，查询时视为未配置。该表不依赖账户数据库 ID，使 JSON 默认账户也可配置。账户或网络变化是另一项配置，不自动复制私钥。
 

@@ -19,7 +19,7 @@ def test_connection_uses_utf8(postgres_namespace: PostgresNamespace) -> None:
 def test_migration_is_idempotent_and_defaults_to_maintenance(
     postgres_namespace: PostgresNamespace,
 ) -> None:
-    assert migrate(postgres_namespace.migration_url) == ["001_operation_control", "002_auth", "003_watchlist", "004_announcements", "005_sec_request_gate", "006_migration_controls", "007_hyperliquid_pair_accounts", "008_hyperliquid_api_wallets", "009_account_auth", "010_pair_risk_controls"]
+    assert migrate(postgres_namespace.migration_url) == ["001_operation_control", "002_auth", "003_watchlist", "004_announcements", "005_sec_request_gate", "006_migration_controls", "007_hyperliquid_pair_accounts", "008_hyperliquid_api_wallets", "009_account_auth", "010_pair_risk_controls", "011_shared_wallet_account_scope"]
     assert migrate(postgres_namespace.migration_url) == []
     with psycopg2.connect(postgres_namespace.migration_url) as conn:
         with conn.cursor() as cursor:

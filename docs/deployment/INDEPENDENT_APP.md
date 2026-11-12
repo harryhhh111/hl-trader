@@ -58,8 +58,7 @@ Web 配置 `HL_APP_TRADER_BIN`、`HL_APP_PAIRS_CONFIG`、可信 Origin、Secure 
 
 使用前，由用户在 Hyperliquid 上为原交易账户授权独立 API Wallet，并把该 API Wallet 的私钥导入自己的
 浏览器钱包。不要把主钱包私钥、API Wallet 私钥、助记词或文件内容发到聊天、仓库、服务器或日志。
-Hyperliquid 按签名钱包共享 nonce；本应用要求每个账户和交易进程使用独立地址，禁止跨账户复用或重新使用
-已淘汰 Agent。页面逐腿生成 EIP-712 订单签名，全部签名完成后才提交；后端恢复签名地址并核对仓位和资产 ID。
+Hyperliquid 按签名钱包共享 nonce；同一交易账户可跨 pair 使用同一托管钱包，Rust 按钱包地址共享写锁串行化写入。禁止跨交易账户复用或重新使用已淘汰 Agent。页面逐腿生成 EIP-712 订单签名，全部签名完成后才提交；后端恢复签名地址并核对仓位和资产 ID。
 
 旧服务器签名模式只保留给显式 CLI/兼容 API。确有需要时，可把独立 agent 私钥放到
 `.runtime/hl-agent.key`（非符号链接、容器 UID 10001 所有、0600 或更严），并使用 override：
