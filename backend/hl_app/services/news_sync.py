@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 from typing import Literal
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
@@ -185,19 +186,17 @@ def run(url: str, bootstrap: bool = False, client: NewsSyncClient | None = None)
     store.mark_attempt(url)
     pages = []
     try:
-        if bootstrap:
-            return _run_pages(url, client, bootstrap, pages, None)
-        with business_task(url) as check_active:
-            return _run_pages(url, client, bootstrap, pages, check_active)
+        task = store.bootstrap_task if bootstrap else business_task
+        with task(url) as check_allowed:
+            return _run_pages(url, client, bootstrap, pages, check_allowed)
     except Exception as exc:
         store.mark_error(url, exc)
         raise
 
 
-def _run_pages(url: str, client: NewsSyncClient, bootstrap: bool, pages: list, check_active) -> dict:
+def _run_pages(url: str, client: NewsSyncClient, bootstrap: bool, pages: list, check_allowed: Callable[[], None]) -> dict:
     for _index in range(MAX_PAGES_PER_RUN):
-        if check_active is not None:
-            check_active()
+        check_allowed()
         position = sync_position(url)
         if position["source_instance"] is not None and position["source_instance"] != client.source_instance:
             raise NewsSyncError("本地绑定的 source_instance 与配置不一致")
@@ -206,10 +205,10 @@ def _run_pages(url: str, client: NewsSyncClient, bootstrap: bool, pages: list, c
         if not bootstrap and position["bootstrap_status"] != "completed":
             raise NewsSyncError("请先完成 bootstrap 并独立激活")
         response = client.fetch(position["next_cursor"])
+        check_allowed()
         result = store.apply_page(url, response, client.source_instance, bootstrap)
         pages.append(result)
-        if check_active is not None:
-            check_active()
+        check_allowed()
         if not response.has_more:
             break
         time.sleep(1)

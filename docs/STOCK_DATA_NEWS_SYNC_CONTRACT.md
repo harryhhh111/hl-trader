@@ -217,7 +217,7 @@ v1 只有 `open_gaps` 和 `earliest_gap_start`，没有各 gap 的自然键、�
 
 ### 8.1 不依赖 full 的完整流程
 
-拟提供以下独立命令；这些命令当前尚未实现：
+消费端已提供以下独立命令；生产 bootstrap、激活和真实联调尚未执行：
 
 ```sh
 .venv/bin/python -m hl_app.news_sync bootstrap   # 开始或续传，可重复执行
@@ -238,7 +238,7 @@ v1 只有 `open_gaps` 和 `earliest_gap_start`，没有各 gap 的自然键、�
 
 ### 8.2 配置与普通 worker
 
-拟新增显式配置，默认关闭：
+消费端显式配置，默认关闭：
 
 ```dotenv
 HL_APP_NEWS_SYNC_ENABLED=false
@@ -248,7 +248,7 @@ HL_APP_STOCK_DATA_READ_TOKEN=
 HL_APP_NEWS_SYNC_INTERVAL_SECONDS=60
 ```
 
-这些变量是本文拟新增合同，当前代码尚未实现。token 不写 `.env.example` 实值，不进前端、命令行参数或 Git。`SOURCE_INSTANCE` 在首次请求前即绑定预期上游，响应中的实例名必须完全一致。bootstrap 使用运行 DSN 和上游 token；activate 只使用迁移管理 DSN，不需要上游 token。
+这些变量已在消费端实现。token 不写 `.env.example` 实值，不进前端、命令行参数或 Git。`SOURCE_INSTANCE` 在首次请求前即绑定预期上游，响应中的实例名必须完全一致。bootstrap 使用运行 DSN 和上游 token；activate 只使用迁移管理 DSN，不需要上游 token。
 
 普通 worker 接入规则：
 
@@ -259,7 +259,7 @@ HL_APP_NEWS_SYNC_INTERVAL_SECONDS=60
 5. 上游模式要求 `HL_APP_ENHANCEMENT_ENABLED=false`。关注理由 AI 草稿是独立功能，不受此限制。
 6. 页面读取 API 只查目标 DB，永不触发现场上游请求。Web 进程不需要上游 token。
 7. dry-run 只展示绑定实例、同步任务和本地状态，不访问真实上游。
-8. 失败保留已提交页和 cursor，下一轮续传；不得把整轮重建为无 cursor bootstrap。
+8. 失败保留已提交页和 cursor，下一轮续传；不得把整轮重建为无 cursor bootstrap。scheduler 隔离同步请求或同步数据校验错误，记录告警，并在失败结束后的配置间隔再次尝试，不中断 Pair 风险和再平衡监控。worker 生命周期锁失效仍须停止进程。
 
 ## 9. 两侧实施分工
 

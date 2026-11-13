@@ -2,18 +2,42 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from ..db import connect
 from ..migration.common import BundleError
-from ..migration.service import _lock, _mode, _require_drained, business_write_guard
+from ..migration.service import (
+    BUSINESS_TASK_LOCK_KEY, _lock, _mode, _require_drained, business_write_guard,
+)
 
 
 class SyncStoreError(BundleError):
     pass
+
+
+@contextmanager
+def bootstrap_task(url: str):
+    """Keep maintenance drain aware of bootstrap, including time spent fetching."""
+    with closing(connect(url)) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock_shared(%s)", (BUSINESS_TASK_LOCK_KEY,))
+
+        def check_maintenance() -> None:
+            try:
+                with conn.cursor() as cursor:
+                    if _mode(cursor) != "maintenance":
+                        raise SyncStoreError("bootstrap 要求应用处于 maintenance")
+            except psycopg2.Error as exc:
+                raise SyncStoreError("bootstrap 任务锁连接失效，停止同步") from exc
+
+        check_maintenance()
+        yield check_maintenance
 
 
 def _hash_event(event) -> str:
@@ -74,6 +98,8 @@ def _require_bootstrap_scope_empty(cursor) -> None:
 
 
 def _check_page_allowed(cursor, bootstrap: bool) -> dict:
+    if bootstrap:
+        _lock(cursor)
     state = _state(cursor)
     if bootstrap:
         if _mode(cursor) != "maintenance":
@@ -152,7 +178,7 @@ def _apply_source(cursor, source_instance: str, event) -> None:
         source = cursor.fetchone()
         if source is None or source["ingest_mode"] != "stock_data":
             raise SyncStoreError("来源映射目标无效")
-        if _source_natural_key(source) != natural:
+        if {key: source[key] for key in natural} != natural:
             raise SyncStoreError("来源映射与自然键不一致")
         cursor.execute(
             """

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from hl_app import workers
 from hl_app.services import news_sync
+from hl_app.services.news_sync_store import SyncStoreError
 
 FIXTURE = Path(__file__).parents[2] / "tests/fixtures/integrations/hl_trader_news_sync_v1.json"
 
@@ -87,3 +89,105 @@ def test_sync_worker_requires_explicit_enable_and_no_local_enhancement(monkeypat
     monkeypatch.setenv("HL_APP_ENHANCEMENT_ENABLED", "true")
     with pytest.raises(workers.ConfigError, match="ENHANCEMENT_ENABLED=false"):
         workers._run_once("postgresql://runtime", "news_sync", lifecycle)
+
+
+@pytest.mark.parametrize("collectors,sync", [("false", "true"), ("true", "false"), ("false", "false")])
+def test_sync_master_and_task_switches_apply_to_both_worker_entries(monkeypatch, collectors, sync):
+    monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", collectors)
+    monkeypatch.setenv("HL_APP_NEWS_SYNC_ENABLED", sync)
+    monkeypatch.setattr(news_sync, "run", lambda *_args: pytest.fail("disabled sync must not run"))
+    monkeypatch.setattr(workers, "assert_active", lambda *_args: pytest.fail("disabled sync must not query DB"))
+    lifecycle = SimpleNamespace(ensure_healthy=lambda: pytest.fail("disabled sync must not acquire a lifecycle"))
+    assert workers._run_once("unused", "news_sync", lifecycle) == {"status": "disabled", "kind": "news_sync"}
+    assert workers.run_once("unused", "news_sync") == {"status": "disabled", "kind": "news_sync"}
+
+
+class StopScheduler(Exception):
+    pass
+
+
+@pytest.fixture
+def scheduler(monkeypatch):
+    for key, value in {
+        "HL_APP_SCHEDULER_ENABLED": "true", "HL_APP_NEWS_SYNC_ENABLED": "true",
+        "HL_APP_NEWS_SYNC_INTERVAL_SECONDS": "60", "HL_APP_RISK_MONITOR_INTERVAL_SECONDS": "30",
+        "HL_APP_REBALANCE_MONITOR_INTERVAL_SECONDS": "30",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    class Lifecycle:
+        closed = False
+        lost = False
+
+        def acquire(self):
+            pass
+
+        def ensure_healthy(self):
+            if self.lost:
+                raise RuntimeError("worker 生命周期锁连接失效")
+
+        def close(self):
+            self.closed = True
+
+    lifecycle = Lifecycle()
+    monkeypatch.setattr(workers, "WorkerLifecycle", lambda _url: lifecycle)
+    clock = SimpleNamespace(now=0, stop_at=65)
+
+    def sleep(seconds):
+        clock.now += seconds
+        if clock.now >= clock.stop_at:
+            raise StopScheduler()
+
+    monkeypatch.setattr(workers, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=sleep))
+    return lifecycle, clock
+
+
+@pytest.mark.parametrize("error", [news_sync.NewsSyncError("HTTP 503", 503), SyncStoreError("来源映射冲突")])
+def test_sync_failure_retries_next_interval_and_keeps_monitors_running(monkeypatch, scheduler, caplog, error):
+    lifecycle, clock = scheduler
+    calls = []
+
+    def run_once(_url, kind, _lifecycle):
+        calls.append((kind, clock.now))
+        if kind == "news_sync" and sum(task == kind for task, _ in calls) == 1:
+            raise error
+
+    monkeypatch.setattr(workers, "_run_once", run_once)
+    with pytest.raises(StopScheduler):
+        workers.run_scheduler("unused")
+    assert [time for task, time in calls if task == "news_sync"] == [0, 60]
+    assert [time for task, time in calls if task == "pair_risk"] == [0, 30, 60]
+    assert [time for task, time in calls if task == "pair_rebalance"] == [0, 30, 60]
+    assert "保留已提交游标" in caplog.text
+    assert lifecycle.closed
+
+
+def test_sync_retry_delay_starts_after_failed_request_finishes(monkeypatch, scheduler):
+    _lifecycle, clock = scheduler
+    clock.stop_at = 105
+    attempts = []
+
+    def run_once(_url, kind, _lifecycle):
+        if kind == "news_sync":
+            attempts.append(clock.now)
+            clock.now += 20
+            raise news_sync.NewsSyncError("timeout")
+
+    monkeypatch.setattr(workers, "_run_once", run_once)
+    with pytest.raises(StopScheduler):
+        workers.run_scheduler("unused")
+    assert attempts == [0, 80]
+
+
+def test_sync_error_does_not_hide_lost_worker_lifecycle(monkeypatch, scheduler):
+    lifecycle, _clock = scheduler
+
+    def run_once(_url, kind, _lifecycle):
+        if kind == "news_sync":
+            lifecycle.lost = True
+            raise news_sync.NewsSyncError("HTTP 503", 503)
+
+    monkeypatch.setattr(workers, "_run_once", run_once)
+    with pytest.raises(RuntimeError, match="worker 生命周期锁连接失效"):
+        workers.run_scheduler("unused")
+    assert lifecycle.closed

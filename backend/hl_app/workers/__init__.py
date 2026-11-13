@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -14,8 +15,10 @@ from ..services import ai
 from ..services import hyperliquid_risk
 from ..services import hyperliquid_rebalance
 from ..services import news_sync
+from ..services.news_sync_store import SyncStoreError
 
 WORKER_LIFECYCLE_LOCK_KEY = 0x484C5F574F524B31
+logger = logging.getLogger(__name__)
 
 
 class WorkerAlreadyRunning(RuntimeError):
@@ -120,7 +123,10 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
             return hyperliquid_risk.monitor_once(url)
         return hyperliquid_rebalance.monitor_once(url)
     if kind == "news_sync":
-        if os.environ.get("HL_APP_NEWS_SYNC_ENABLED", "false").lower() != "true":
+        if (
+            os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true"
+            or os.environ.get("HL_APP_NEWS_SYNC_ENABLED", "false").lower() != "true"
+        ):
             return {"status": "disabled", "kind": kind}
         if _enhancement_enabled():
             raise ConfigError("上游资讯同步模式要求 HL_APP_ENHANCEMENT_ENABLED=false")
@@ -183,8 +189,12 @@ def run_scheduler(url: str) -> None:
                     _run_once(url, "pair_rebalance", lifecycle)
                     next_rebalance = now + rebalance_interval
                 if now >= next_news_sync:
-                    _run_once(url, "news_sync", lifecycle)
-                    next_news_sync = now + news_sync_interval
+                    try:
+                        _run_once(url, "news_sync", lifecycle)
+                    except (news_sync.NewsSyncError, SyncStoreError) as exc:
+                        lifecycle.ensure_healthy()
+                        logger.warning("资讯同步失败，保留已提交游标，等待下一轮重试：%s", exc)
+                    next_news_sync = time.monotonic() + news_sync_interval
             except MaintenanceMode:
                 next_collection = now + interval
                 next_risk = now + risk_interval

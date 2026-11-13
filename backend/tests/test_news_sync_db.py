@@ -7,8 +7,10 @@ import psycopg2
 import pytest
 
 from hl_app.db import migrate
+from hl_app.migration.service import maintenance
 from hl_app.services import news, news_sync
 from hl_app.services import news_sync_store as store
+from hl_app.workers import WorkerLifecycle
 
 from .conftest import PostgresNamespace
 
@@ -207,3 +209,127 @@ def test_empty_upstream_bootstrap_has_explicit_completed_state(ready) -> None:
     )
     assert result["events"] == 0 and result["bootstrap_status"] == "completed"
     assert store.activate(ready.migration_url)["status"] == "active"
+
+
+def source_update():
+    value = json.loads(FIXTURE.read_text())
+    value["items"] = []
+    value["sources"][0].update(
+        sync_seq=5, enabled=True, source_status="enabled", status_reason=None,
+        last_attempt_status="success", last_success_at="2026-11-12T10:05:00Z",
+        open_gaps=0, earliest_gap_start=None,
+    )
+    value["next_cursor"] = "source-update-5"
+    return news_sync.parse_response(json.dumps(value).encode())
+
+
+def test_incremental_updates_existing_source_and_check_projection(ready):
+    store.apply_page(ready.runtime_url, response(), "stock-data-fixture", bootstrap=True)
+    store.activate(ready.migration_url)
+    result = store.apply_page(ready.runtime_url, source_update(), "stock-data-fixture")
+    assert result["events"] == 1 and result["replayed"] == 0
+    assert news_sync.sync_position(ready.runtime_url)["next_cursor"] == "source-update-5"
+    with psycopg2.connect(ready.runtime_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT enabled, source_status, status_reason FROM watchlist_announcement_source")
+            assert cursor.fetchone() == (True, "enabled", None)
+            cursor.execute("SELECT last_attempt_status FROM watchlist_announcement_check_state")
+            assert cursor.fetchone()[0] == "success"
+            cursor.execute("SELECT open_gaps, earliest_gap_start, sync_seq FROM hl_news_sync_source_state")
+            assert cursor.fetchone() == (0, None, 5)
+            cursor.execute("SELECT count(*) FROM hl_news_sync_source_map")
+            assert cursor.fetchone()[0] == 1
+    replay = store.apply_page(ready.runtime_url, source_update(), "stock-data-fixture")
+    assert replay["replayed"] == 1
+
+
+def test_existing_source_natural_key_is_still_checked(ready):
+    store.apply_page(ready.runtime_url, response(), "stock-data-fixture", bootstrap=True)
+    store.activate(ready.migration_url)
+    with psycopg2.connect(ready.runtime_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE watchlist_announcement_source SET entry_url = 'https://example.com/changed'")
+    with pytest.raises(store.SyncStoreError, match="来源映射与自然键不一致"):
+        store.apply_page(ready.runtime_url, source_update(), "stock-data-fixture")
+    assert news_sync.sync_position(ready.runtime_url)["next_cursor"] == "opaque-cursor-4"
+
+
+def test_bootstrap_holds_task_lock_until_all_fetching_and_writes_finish(ready):
+    observations = []
+
+    class Client:
+        source_instance = "stock-data-fixture"
+
+        def fetch(self, cursor):
+            observations.append(maintenance(ready.migration_url, timeout_seconds=0.05)["drained"])
+            return response()
+
+    lifecycle = WorkerLifecycle(ready.runtime_url)
+    lifecycle.acquire()
+    try:
+        result = news_sync.run(ready.runtime_url, bootstrap=True, client=Client())
+    finally:
+        lifecycle.close()
+    assert result["status"] == "completed"
+    assert observations == [False]
+    assert maintenance(ready.migration_url)["drained"]
+    assert store.activate(ready.migration_url)["status"] == "active"
+
+
+def test_bootstrap_releases_task_lock_after_fetch_failure(ready):
+    class Client:
+        source_instance = "stock-data-fixture"
+
+        def fetch(self, cursor):
+            raise news_sync.NewsSyncError("HTTP 503", 503)
+
+    with pytest.raises(news_sync.NewsSyncError, match="HTTP 503"):
+        news_sync.run(ready.runtime_url, bootstrap=True, client=Client())
+    assert maintenance(ready.migration_url)["drained"]
+    state = store.status(ready.runtime_url)
+    assert state["bootstrap_status"] == "not_started"
+    assert state["counts"]["hl_news_sync_event_receipt"] == 0
+    assert not state["next_cursor_saved"]
+    assert state["last_error"] == "HTTP 503"
+
+
+def test_bootstrap_checks_mode_before_fetch_and_again_before_writing(ready):
+    calls = []
+
+    class Client:
+        source_instance = "stock-data-fixture"
+
+        def fetch(self, cursor):
+            calls.append(cursor)
+            # Simulate an administrator changing mode while a network request is pending.
+            with psycopg2.connect(ready.migration_url) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("UPDATE operation_control SET mode = 'active'")
+            return response()
+
+    with pytest.raises(store.SyncStoreError, match="maintenance"):
+        news_sync.run(ready.runtime_url, bootstrap=True, client=Client())
+    assert calls == [None]
+    state = store.status(ready.runtime_url)
+    assert state["counts"]["hl_news_sync_event_receipt"] == 0
+    assert not state["next_cursor_saved"]
+    with pytest.raises(store.SyncStoreError, match="maintenance"):
+        news_sync.run(ready.runtime_url, bootstrap=True, client=Client())
+    assert calls == [None]
+
+
+def test_bootstrap_guard_fails_closed_if_its_lock_connection_is_lost(ready, monkeypatch):
+    connections = []
+    connect = store.connect
+
+    def capture(*args, **kwargs):
+        conn = connect(*args, **kwargs)
+        connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(store, "connect", capture)
+    with store.bootstrap_task(ready.runtime_url) as check_allowed:
+        connections[0].close()
+        with pytest.raises(store.SyncStoreError, match="任务锁连接失效"):
+            check_allowed()
+    assert maintenance(ready.migration_url)["drained"]
