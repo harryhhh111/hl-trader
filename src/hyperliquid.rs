@@ -404,6 +404,24 @@ impl Adapter {
         })
     }
 
+    pub async fn position_for(
+        &self,
+        user: Address,
+        coin: &str,
+        dex: Option<&str>,
+    ) -> Result<Option<PositionData>, AdapterError> {
+        let state = self
+            .client
+            .clearinghouse_state(user, dex.map(str::to_string))
+            .await
+            .map_err(classify_info_error)?;
+        Ok(state
+            .asset_positions
+            .into_iter()
+            .map(|item| item.position)
+            .find(|position| position.coin == coin))
+    }
+
     pub async fn place_order(
         &self,
         signer: &PrivateKeySigner,
@@ -695,9 +713,10 @@ impl Adapter {
         Ok(self.leverage_for(user, coin).await?.leverage_type == "cross")
     }
 
-    pub async fn update_signed_leverage(
+    pub async fn submit_signed_action(
         &self,
         request: hypersdk::hypercore::api::ActionRequest,
+        operation: &str,
     ) -> Result<Option<String>, AdapterError> {
         use hypersdk::hypercore::api::{OkResponse, Response};
 
@@ -710,7 +729,7 @@ impl Adapter {
             Response::Ok(OkResponse::Default) => Ok(None),
             Response::Err(message) => Ok(Some(message)),
             other => Err(AdapterError::BadResponse(format!(
-                "杠杆调整响应类型无法识别: {other:?}"
+                "{operation}响应类型无法识别: {other:?}"
             ))),
         }
     }

@@ -141,6 +141,40 @@ export const hyperliquidPairsApi = {
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/leverage/managed-execute`,
     { method: "POST", body: JSON.stringify(body) },
   ),
+  prepareMarginTopUp: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    expected_signer: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlMarginReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/isolated-margin/browser-prepare`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  submitMarginTopUp: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    expected_signer: string;
+    action_id: string;
+    signature: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlMarginReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/isolated-margin/browser-submit`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  executeManagedMarginTopUp: (pairId: string, body: {
+    account_address: string;
+    config_revision: string;
+    coin: string;
+    request_id: string;
+    wallet_version: number;
+    confirmation: string;
+  }) => apiFetch<import("@/lib/types/hyperliquid").HlMarginReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/isolated-margin/managed-execute`,
+    { method: "POST", body: JSON.stringify(body) },
+  ),
+  managedMarginTopUp: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlMarginReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
+  ),
   accounts: (pairId: string) => apiFetch<import("@/lib/types/hyperliquid").HlPairAccounts>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/accounts`,
   ),

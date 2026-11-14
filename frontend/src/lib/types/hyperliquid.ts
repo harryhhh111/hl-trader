@@ -265,6 +265,31 @@ export interface HlLeverageReport {
   error_code?: string | null;
 }
 
+export interface HlMarginReport {
+  schema_version: 1;
+  status: 'prepared' | 'executing' | 'succeeded' | 'rejected' | 'incomplete' | 'unknown';
+  action_id: string | null;
+  request_id?: string;
+  pair_id: string;
+  network: 'mainnet' | 'testnet';
+  config_revision: string;
+  account_address: string;
+  coin: string;
+  position_size?: string;
+  position_notional?: string;
+  current_margin?: string;
+  margin_delta?: string;
+  target_margin?: string;
+  target_ratio_pct: '80';
+  expected_signer?: string;
+  nonce?: number;
+  typed_data?: Record<string, unknown>;
+  result?: string | null;
+  diagnostics?: string[];
+  managed_status?: 'running' | 'succeeded' | 'incomplete' | 'failed' | 'unknown';
+  error_code?: string | null;
+}
+
 export type HlRiskStatus = 'disabled' | 'monitoring' | 'triggered' | 'executing' | 'completed' | 'incomplete' | 'unknown' | 'unavailable';
 export type HlRiskTrigger = 'take_profit' | 'stop_loss';
 

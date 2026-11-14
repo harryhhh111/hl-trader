@@ -8,6 +8,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { HyperliquidPage } from './hyperliquid-page';
 import { HyperliquidAdjustmentGuidePage } from './hyperliquid-adjustment-guide-page';
 import { HyperliquidPairPage } from './hyperliquid-pair-page';
+import { marginTopUpEstimate } from '../components/hyperliquid/margin-top-up';
 import type {
   HlPairDirectory,
   HlPairSnapshot,
@@ -142,6 +143,45 @@ test('总览和详情方向摘要显示具体两腿多空', () => {
   assert.match(renderOverview(qc), /HYPE 多 \/ BTC 空/);
   assert.match(renderDetail(qc, value.pair.id), /HYPE 多 \/ BTC 空/);
   qc.clear();
+});
+
+test('仓位模块位于风控和比价图之前', () => {
+  const value = snapshot(hypeFixture);
+  const qc = seed(value);
+  const html = renderDetail(qc, value.pair.id);
+  const positions = html.indexOf('>仓位</');
+  assert.ok(positions >= 0);
+  assert.ok(positions < html.indexOf('Pair 止盈止损'));
+  assert.ok(positions < html.indexOf('HYPE / BTC 比价'));
+  qc.clear();
+});
+
+test('逐仓低于名义 80% 时显示补足入口并计算金额', () => {
+  const value = snapshot(nbisFixture);
+  const current = value.blocks.positions.items?.[0];
+  assert.ok(current);
+  const position = { ...current, notional: '1000', margin_used: '500' };
+  value.blocks.positions.items![0] = position;
+  assert.equal(position.margin_mode, 'isolated');
+  assert.deepEqual(marginTopUpEstimate(position), { ratioPct: 50, amount: 300 });
+  assert.deepEqual(marginTopUpEstimate({ ...position, margin_used: '800' }), { ratioPct: 80, amount: 0 });
+  const qc = seed(value);
+  const html = renderDetail(qc, value.pair.id);
+  assert.match(html, /50\.00/);
+  assert.match(html, /aria-label="补足 xyz:NBIS 逐仓保证金"/);
+  qc.clear();
+});
+
+test('逐仓保证金未知或非法时不显示补足入口', () => {
+  for (const margin of [null, '', ' ', '-1', 'NaN']) {
+    const value = snapshot(nbisFixture);
+    const position = { ...value.blocks.positions.items![0], margin_mode: 'isolated' as const, notional: '100', margin_used: margin };
+    value.blocks.positions.items![0] = position;
+    assert.equal(marginTopUpEstimate(position), null);
+    const qc = seed(value);
+    assert.doesNotMatch(renderDetail(qc, value.pair.id), /aria-label="补足 xyz:NBIS 逐仓保证金"/);
+    qc.clear();
+  }
 });
 
 test('详情页保留账户切换，添加账户表单默认收进弹窗', () => {

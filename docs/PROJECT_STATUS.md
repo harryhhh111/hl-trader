@@ -15,6 +15,7 @@
 | 小额调仓差额处理 | 某腿保护价名义不足 10 USD 时跳过并提示，不再阻止另一腿符合条件的订单 | `9e3ad44` |
 | Pair 止盈止损 | 两腿当前未实现盈亏合计、USD 阈值、只读 worker、页面触发提醒和人工确认平仓；规则与事件按用户、pair 和账户关联 | `87ffcd8`；[风险监控说明](HYPERLIQUID_PAIR_RISK_AUTOMATION.md) |
 | 杠杆与增仓前检查 | 显示并手动调整逐合约 Cross / isolated 和 1–3x；增仓在签名、提交及逐腿发送前重读设置，纯减仓和平仓不被该检查阻塞 | `5b9dbcc`、`950e9a4`；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
+| 逐仓保证金补足 | isolated 仓位低于名义价值 80% 时显示比例和所需金额，由用户通过托管或浏览器 API Wallet 人工确认；签名前后及执行后核对实际仓位和保证金 | 代码已实现，尚未部署或真实联调；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
 | 阈值再平衡（人工版） | 固定目标、连续两次偏离确认、候选腿只读预览、冷却和人工执行回写；未超阈值腿不动，风险退出优先。已部署，真实订单仍需验收 | `8f89e69`；[阈值再平衡合同](HYPERLIQUID_THRESHOLD_REBALANCING.md)；migration `012` |
 | stock_data 资讯同步消费端 | 严格 DTO、来源映射、事件收据、页事务、bootstrap/status/activate 与 worker 已在当前代码实现；同步来源不进入本地直接采集。尚未部署或真实联调 | [同步合同](STOCK_DATA_NEWS_SYNC_CONTRACT.md)；migration `013` |
 

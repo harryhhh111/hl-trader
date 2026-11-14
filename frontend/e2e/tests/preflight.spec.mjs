@@ -114,3 +114,72 @@ test('检查失败禁止增仓，但纯减仓预览仍可执行；仅逐仓市�
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
   await expect(execute).toBeEnabled();
 });
+
+
+test('逐仓仓位显示保证金比例并可打开补足确认弹窗', async ({ page }) => {
+  await setup(page, { mode: 'cross', leverage: 3, onlyIsolated: false, failed: false });
+  await page.goto('/hyperliquid/pairs/nbis-crwv');
+  await page.getByRole('button', { name: '补足 xyz:NBIS 逐仓保证金', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '补足 xyz:NBIS 逐仓保证金', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('70.64%', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('91.625579 USD', { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('确认补足保证金')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '确认补足保证金', exact: true })).toBeDisabled();
+});
+
+async function marginPage(page, margin) {
+  let snapshot;
+  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/dashboard', async route => {
+    snapshot ??= route.fetch().then(response => response.json());
+    const payload = await snapshot;
+    Object.assign(payload.data.blocks.positions.items[0], { margin_mode: 'isolated', notional: '100', margin_used: margin });
+    await route.fulfill({ json: payload });
+  });
+  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/api-wallet?*', route => json(route, {
+    configured: true, wallet_version: 1, wallet_address: wallet, active_execution: null,
+  }));
+  await page.goto('/login');
+  await page.getByLabel('登录 token').fill('a'.repeat(64));
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(page).toHaveURL(/\/hyperliquid$/);
+  await page.goto('/hyperliquid/pairs/nbis-crwv');
+  await expect(page.getByRole('cell', { name: 'xyz:NBIS', exact: true }).first()).toBeVisible();
+}
+
+test('缺失逐仓保证金不当作零，不提供补足入口', async ({ page }) => {
+  await marginPage(page, null);
+  await expect(page.getByRole('button', { name: '补足 xyz:NBIS 逐仓保证金', exact: true })).toHaveCount(0);
+  await page.unrouteAll({ behavior: 'wait' });
+});
+
+for (const status of ['failed', 'unknown']) {
+  test(`逐仓追加 ${status} 显示诊断并保留执行结果`, async ({ page }) => {
+    let requestId;
+    await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/isolated-margin/managed-execute', route => {
+      requestId = route.request().postDataJSON().request_id;
+      return json(route, {
+        schema_version: 1, status: status === 'failed' ? 'incomplete' : 'unknown',
+        managed_status: status, request_id: requestId, action_id: null,
+        diagnostics: ['未追加保证金：测试诊断，请先核对'],
+      });
+    });
+    await marginPage(page, '50');
+    await page.getByRole('button', { name: '补足 xyz:NBIS 逐仓保证金', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '补足 xyz:NBIS 逐仓保证金', exact: true });
+    await dialog.getByLabel('确认补足保证金').fill('xyz:NBIS 补足逐仓保证金至80%');
+    await dialog.getByRole('button', { name: '确认补足保证金', exact: true }).click();
+    await expect(dialog).toContainText('未追加保证金：测试诊断，请先核对');
+    await expect(dialog.getByText(status === 'failed' ? '保证金未追加' : '结果未知，禁止直接重试', { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('status')).toHaveCount(0);
+    if (status === 'unknown') {
+      await expect(dialog.getByRole('button', { name: '确认补足保证金', exact: true })).toBeDisabled();
+      await expect(dialog.getByRole('button', { name: '浏览器本地私钥', exact: true })).toBeDisabled();
+      await dialog.getByRole('button', { name: '关闭弹窗', exact: true }).click();
+      await page.getByRole('button', { name: '补足 xyz:NBIS 逐仓保证金', exact: true }).click();
+      await expect(dialog).toContainText(requestId);
+      await expect(dialog.getByRole('button', { name: '确认补足保证金', exact: true })).toBeDisabled();
+    }
+    await page.unrouteAll({ behavior: 'wait' });
+  });
+}

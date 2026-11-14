@@ -341,7 +341,7 @@ pub async fn submit(
     report.typed_data = None;
     report.result = None;
     store.save(&report)?;
-    match adapter.update_signed_leverage(signed).await {
+    match adapter.submit_signed_action(signed, "杠杆调整").await {
         Ok(Some(message)) => {
             report.status = "rejected".into();
             report.result = Some(message);

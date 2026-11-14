@@ -11,6 +11,7 @@ from ..services import hyperliquid_accounts as accounts_service
 from ..services import hyperliquid_adjustments as adjustments_service
 from ..services import hyperliquid_history as history_service
 from ..services import hyperliquid_leverage as leverage_service
+from ..services import hyperliquid_margin as margin_service
 from ..services import hyperliquid_preflight as preflight_service
 from ..services import hyperliquid_pairs as pairs_service
 from ..services import hyperliquid_quotes as quotes_service
@@ -128,6 +129,29 @@ class BrowserLeverageSubmit(BrowserLeveragePrepare):
 
 
 class ManagedLeverageExecute(LeverageRequest):
+    request_id: str = Field(min_length=36, max_length=36)
+    wallet_version: int = Field(ge=1)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
+class IsolatedMarginRequest(BaseModel):
+    account_address: str = Field(min_length=42, max_length=42)
+    config_revision: str = Field(min_length=64, max_length=64)
+    coin: str = Field(min_length=1, max_length=64)
+
+    model_config = {"extra": "forbid"}
+
+
+class BrowserIsolatedMarginPrepare(IsolatedMarginRequest):
+    expected_signer: str = Field(min_length=42, max_length=42)
+
+
+class BrowserIsolatedMarginSubmit(BrowserIsolatedMarginPrepare):
+    action_id: str = Field(min_length=41, max_length=41)
+    signature: str = Field(min_length=132, max_length=132)
+
+
+class ManagedIsolatedMarginExecute(IsolatedMarginRequest):
     request_id: str = Field(min_length=36, max_length=36)
     wallet_version: int = Field(ge=1)
     confirmation: str = Field(min_length=1, max_length=100)
@@ -402,6 +426,42 @@ def execute_managed_leverage(pair_id: str, body: ManagedLeverageExecute, request
             request.app.state.settings.database_url, pair_id, body.account_address,
             body.config_revision, body.coin, body.leverage, body.margin_mode,
             body.confirmation, body.request_id, body.wallet_version, request.state.session,
+        )
+        return JSONResponse({"data": result}, status_code=status)
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/isolated-margin/browser-prepare")
+def prepare_browser_isolated_margin(pair_id: str, body: BrowserIsolatedMarginPrepare, request: Request) -> dict:
+    try:
+        return {"data": margin_service.prepare_browser(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.expected_signer, _owner(request),
+        )}
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/isolated-margin/browser-submit")
+def submit_browser_isolated_margin(pair_id: str, body: BrowserIsolatedMarginSubmit, request: Request) -> dict:
+    try:
+        return {"data": margin_service.submit_browser(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.expected_signer, body.action_id,
+            body.signature, _owner(request),
+        )}
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
+@router.post("/hyperliquid/pairs/{pair_id}/isolated-margin/managed-execute")
+def execute_managed_isolated_margin(pair_id: str, body: ManagedIsolatedMarginExecute, request: Request) -> dict:
+    try:
+        result, status = margin_service.execute_managed(
+            request.app.state.settings.database_url, pair_id, body.account_address,
+            body.config_revision, body.coin, body.confirmation, body.request_id,
+            body.wallet_version, request.state.session,
         )
         return JSONResponse({"data": result}, status_code=status)
     except Exception as exc:

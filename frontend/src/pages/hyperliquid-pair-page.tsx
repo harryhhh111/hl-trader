@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { EChartsWrapper } from '@/components/charts/echarts-wrapper';
 import { AccountSettings } from '@/components/hyperliquid/account-settings';
+import { MarginTopUp, marginTopUpEstimate } from '@/components/hyperliquid/margin-top-up';
 import { PositionAdjustment } from '@/components/hyperliquid/position-adjustment';
 import { PairRiskControls } from '@/components/hyperliquid/pair-risk-controls';
 import { RebalanceControls } from '@/components/hyperliquid/rebalance-controls';
@@ -23,7 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiError } from '@/lib/api/client';
-import type { HlPairSnapshot, HlPairDescriptor, HlRatioPoint } from '@/lib/types/hyperliquid';
+import type { HlPairSnapshot, HlPairDescriptor, HlRatioPoint, HlV2Position } from '@/lib/types/hyperliquid';
 
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail || error.message : error instanceof Error ? error.message : '请求失败';
 
@@ -102,6 +103,19 @@ function RatioChart({ points, coins }: { points: HlRatioPoint[] | null; coins: [
   );
 }
 
+function MarginCell({ position, descriptor, configRevision }: {
+  position: HlV2Position;
+  descriptor: HlPairDescriptor;
+  configRevision: string;
+}) {
+  const estimate = marginTopUpEstimate(position);
+  return <td className="pr-4 font-mono">
+    {dash(position.margin_used)}
+    {position.margin_mode === 'isolated' && estimate && <span className={estimate.amount > 0 ? 'text-amber-600' : 'text-muted-foreground'}>（{estimate.ratioPct.toFixed(2)}%）</span>}
+    {position.margin_mode === 'isolated' && estimate && estimate.amount > 0 && <div className="mt-1"><MarginTopUp descriptor={descriptor} configRevision={configRevision} position={position} /></div>}
+  </td>;
+}
+
 function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; configRevision: string }) {
   const { account, positions, funding, ratio, unlocks } = snapshot.blocks;
   const descriptor = snapshot.pair;
@@ -131,25 +145,16 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
         </CardContent>
       </Card>
 
-      <PairRiskControls descriptor={descriptor} configRevision={configRevision} />
-      <RebalanceControls descriptor={descriptor} configRevision={configRevision} />
-      <PairOrderPreflight descriptor={descriptor} configRevision={configRevision} />
-
-      <BlockFrame title={`${first} / ${second} 比价`} block={ratio} hint="UTC 已收盘日线；缺失日期断线；30/90 天切换。">
-        <RatioChart points={ratio.points} coins={descriptor.coins} />
-        <p className="text-xs text-muted-foreground">数据截至 {dash(ratio.as_of_date)} UTC 收盘；当日 live {dash(ratio.live)}</p>
-      </BlockFrame>
-
       <BlockFrame
         title="仓位"
         block={positions}
-        hint="按交易所实际持仓展示；缺项显示 —；保证金为交易所口径。"
+        hint="按交易所实际持仓展示；缺项显示 —；逐仓保证金低于名义价值 80% 时需人工确认补足。"
         action={<PositionAdjustment descriptor={descriptor} configRevision={configRevision} />}
       >
         {positions.items == null
           ? <p className="text-muted-foreground">持仓不可用</p>
           : positions.items.length === 0
-            ? <p className="text-muted-foreground">无持仓（已确认空仓）；可在上方下单前检查中设置合约杠杆。</p>
+            ? <p className="text-muted-foreground">无持仓（已确认空仓）；可在下方下单前检查中设置合约杠杆。</p>
             : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm whitespace-nowrap">
@@ -167,13 +172,22 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
                       <td className={`pr-4 font-mono ${Number(p.unrealized_pnl) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signed(p.unrealized_pnl)}</td>
                       <td className="pr-4">{p.margin_mode ?? '—'}</td>
                       <td className="pr-4 font-mono">{p.leverage == null ? '—' : `${p.leverage}x`} / {p.max_leverage == null ? '—' : `${p.max_leverage}x`}</td>
-                      <td className="pr-4 font-mono">{dash(p.margin_used)}</td>
+                      <MarginCell position={p} descriptor={descriptor} configRevision={configRevision} />
                       <td className="pr-4 font-mono">{dash(p.liquidation_px)}</td>
                     </tr>
                   ))}</tbody>
                 </table>
               </div>
             )}
+      </BlockFrame>
+
+      <PairRiskControls descriptor={descriptor} configRevision={configRevision} />
+      <RebalanceControls descriptor={descriptor} configRevision={configRevision} />
+      <PairOrderPreflight descriptor={descriptor} configRevision={configRevision} />
+
+      <BlockFrame title={`${first} / ${second} 比价`} block={ratio} hint="UTC 已收盘日线；缺失日期断线；30/90 天切换。">
+        <RatioChart points={ratio.points} coins={descriptor.coins} />
+        <p className="text-xs text-muted-foreground">数据截至 {dash(ratio.as_of_date)} UTC 收盘；当日 live {dash(ratio.live)}</p>
       </BlockFrame>
 
       <BlockFrame title="资金费" block={funding} hint="市场费率、日收付估算与实际收付分开标注。">

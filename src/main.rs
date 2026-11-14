@@ -9,6 +9,7 @@ mod dashboard;
 mod hyperliquid;
 mod intel;
 mod leverage;
+mod margin;
 mod pair;
 mod preflight;
 mod receipt;
@@ -291,6 +292,59 @@ enum Commands {
         #[arg(long, required = true)]
         json: bool,
     },
+    /// 生成 isolated 仓位补足至名义价值 80% 的浏览器签名，不发送写请求。
+    IsolatedMarginPrepare {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 校验浏览器签名并提交 isolated 保证金补足。
+    IsolatedMarginSubmit {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        signer: String,
+        #[arg(long)]
+        action_id: String,
+        #[arg(long)]
+        signature: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// 使用托管 API Wallet 将 isolated 保证金补足至名义价值 80%。
+    IsolatedMarginExecute {
+        #[arg(long)]
+        pair: String,
+        #[arg(long)]
+        address: String,
+        #[arg(long)]
+        coin: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long, conflicts_with = "secret_fd")]
+        secret_file: Option<PathBuf>,
+        #[arg(long)]
+        secret_fd: Option<std::os::fd::RawFd>,
+        #[arg(long)]
+        request_id: String,
+        #[arg(long, required = true)]
+        json: bool,
+    },
     /// 多 pair 主网只读看板（v2）：--config 是 JSON pair 配置；只读、不装载私钥。
     Dashboard {
         /// 采集指定 pair id 的快照；与 --announcements 二选一。
@@ -500,6 +554,60 @@ async fn main() -> ExitCode {
                 coin,
                 leverage,
                 margin_mode,
+                state_dir,
+                secret_file,
+                secret_fd,
+                request_id,
+            )
+            .await
+        }
+        Commands::IsolatedMarginPrepare {
+            pair,
+            address,
+            coin,
+            state_dir,
+            signer,
+            json: _,
+        } => {
+            cmd_isolated_margin_prepare(&config_path, pair, address, coin, state_dir, signer).await
+        }
+        Commands::IsolatedMarginSubmit {
+            pair,
+            address,
+            coin,
+            state_dir,
+            signer,
+            action_id,
+            signature,
+            json: _,
+        } => {
+            cmd_isolated_margin_submit(
+                &config_path,
+                pair,
+                address,
+                coin,
+                state_dir,
+                signer,
+                action_id,
+                signature,
+            )
+            .await
+        }
+        Commands::IsolatedMarginExecute {
+            pair,
+            address,
+            coin,
+            state_dir,
+            secret_file,
+            secret_fd,
+            request_id,
+            json: _,
+        } => {
+            cmd_isolated_margin_execute(
+                &config_path,
+                pair,
+                address,
+                coin,
                 state_dir,
                 secret_file,
                 secret_fd,
@@ -1532,6 +1640,17 @@ impl LeverageContext {
             state_dir: &self.state_dir,
         }
     }
+
+    fn margin_request(&self) -> margin::MarginRequest<'_> {
+        margin::MarginRequest {
+            pair: &self.pair,
+            config_path: &self.path,
+            config_revision: &self.config.revision,
+            account: self.account,
+            coin: &self.coin,
+            state_dir: &self.state_dir,
+        }
+    }
 }
 
 fn load_leverage_context(
@@ -1724,6 +1843,129 @@ async fn cmd_leverage_execute(
     let adapter = Adapter::for_network(context.pair.descriptor.network);
     leverage_result(
         leverage::execute_managed(&adapter, &signer, &context.request(), &request_id).await,
+    )
+}
+
+fn margin_result(result: Result<margin::MarginReport, adjust::AdjustError>) -> ExitCode {
+    match result {
+        Ok(report) => {
+            let code = match report.status.as_str() {
+                "prepared" | "succeeded" => EXIT_OK,
+                "unknown" => EXIT_UNKNOWN,
+                _ => EXIT_ERROR,
+            };
+            match serde_json::to_string(&report) {
+                Ok(json) => println!("{json}"),
+                Err(error) => return runtime_err(format!("保证金结果序列化失败: {error}")),
+            }
+            ExitCode::from(code)
+        }
+        Err(adjust::AdjustError::Refused(message)) => usage_err(message),
+        Err(error) => runtime_err(error),
+    }
+}
+
+fn isolated_margin_context(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    state_dir: PathBuf,
+    signer: String,
+) -> Result<LeverageContext, ExitCode> {
+    load_leverage_context(
+        config_path,
+        leverage_command(pair, address, coin, 1, "isolated".into(), state_dir, signer),
+    )
+}
+
+async fn cmd_isolated_margin_prepare(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    state_dir: PathBuf,
+    signer: String,
+) -> ExitCode {
+    let context = match isolated_margin_context(config_path, pair, address, coin, state_dir, signer)
+    {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    margin_result(margin::prepare(&adapter, &context.margin_request(), context.signer, None).await)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_isolated_margin_submit(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    state_dir: PathBuf,
+    signer: String,
+    action_id: String,
+    signature: String,
+) -> ExitCode {
+    let context = match isolated_margin_context(config_path, pair, address, coin, state_dir, signer)
+    {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let signature = match signature.parse() {
+        Ok(signature) => signature,
+        Err(error) => return usage_err(format!("签名非法: {error}")),
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    margin_result(
+        margin::submit(
+            &adapter,
+            &context.margin_request(),
+            context.signer,
+            &action_id,
+            signature,
+        )
+        .await,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_isolated_margin_execute(
+    config_path: &std::path::Path,
+    pair: String,
+    address: String,
+    coin: String,
+    state_dir: PathBuf,
+    secret_file: Option<PathBuf>,
+    secret_fd: Option<std::os::fd::RawFd>,
+    request_id: String,
+) -> ExitCode {
+    if !valid_request_id(&request_id) {
+        return usage_err("--request-id 必须是 UUID 格式");
+    }
+    let signer = match (secret_file, secret_fd) {
+        (Some(path), None) => load_agent_signer(&path),
+        (None, Some(fd)) => load_agent_signer_fd(fd),
+        _ => return usage_err("必须且只能提供 --secret-file 或 --secret-fd"),
+    };
+    let signer = match signer {
+        Ok(signer) => signer,
+        Err(error) => return usage_err(format!("私钥加载被拒绝: {error}")),
+    };
+    let context = match isolated_margin_context(
+        config_path,
+        pair,
+        address,
+        coin,
+        state_dir,
+        format!("{}", signer.address()).to_lowercase(),
+    ) {
+        Ok(context) => context,
+        Err(code) => return code,
+    };
+    let adapter = Adapter::for_network(context.pair.descriptor.network);
+    margin_result(
+        margin::execute_managed(&adapter, &signer, &context.margin_request(), &request_id).await,
     )
 }
 
