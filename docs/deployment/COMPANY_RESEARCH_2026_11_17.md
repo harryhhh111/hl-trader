@@ -74,3 +74,13 @@ docker compose --env-file .runtime/docker.env \
 前端单元测试、类型检查及构建通过，浏览器 66 项通过、2 项跳过。新增桌面/手机用例在 `frame-ancestors 'none'` 和 `X-Frame-Options: DENY` 下真实打开独立标签页，验证正文、样式、图片、无 opener、关闭原页后刷新、原生折叠及匿名 401。线上真实账号浏览器未代行，不把模拟与资源核验称为生产账号操作。
 
 本地元数据为 `.runtime/deployments/research-newpage-20261117-before.json` 与 `research-newpage-20261117-deployed.json`；回退 gateway 标签为 `hl-app-gateway:before-research-newpage-ec03c66`。未执行数据库迁移或交易，未推送远端。
+
+## 公司单入口与紧凑列表（2026-11-17 17:07 UTC）
+
+研究列表改为每家公司一行、一个入口，主报告优先；只有专题或更新的公司也保留入口。同公司的其他报告在阅读页切换，搜索专题不改变主入口。列表不再展开所有报告标题、数量及别名，未收录说明默认折叠。代码提交 `6e88553`。
+
+前端单元测试、类型检查、构建通过，浏览器 68 项通过、2 项跳过。桌面/手机实际验证单公司单链接、行高不超过 80px、无整体横向溢出、专题搜索保留主报告以及阅读页切换与返回流程。三篇报告选择主入口和专题独有公司的回退规则另由单元测试覆盖。
+
+本次仅更新 gateway：镜像 `sha256:b349fd1bb103f058906b4b29747ca8f45af16ab1e8f76e9a9d7b3ccc98256e4f`，实际资源 `/assets/index-FjNj_xE1.js`。部署后经 gateway 健康检查为 ok，新公司列表资源已生效，匿名研究请求仍为 401；Web、worker 容器和镜像均保持原样，原研究快照不变。公网真实账号浏览器未代行，不将上述模拟与资源检查称为该项实测。
+
+本地部署记录为 `.runtime/deployments/research-company-entry-20261117-before.json` 与 `research-company-entry-20261117-deployed.json`，回退标签 `hl-app-gateway:before-research-company-entry-6e88553`。未执行数据库迁移或交易，未推送远端。
