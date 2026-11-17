@@ -1,0 +1,22 @@
+# 公司研究 HTML 阅读：只读挂载快照根目录的 Compose override 示例。
+#
+# 用法：
+#   docker compose --env-file .runtime/docker.env \
+#     -f compose.yaml -f compose.research-reports.yaml up -d web
+#
+# 前提：快照已经在容器外生成（见 README「公司研究 HTML 报告」一节）。
+# 快照根目录挂载为只读，Web 容器不需要读取整份研究仓库；
+# 研究内容也不会打进前端构建产物。
+#
+# 未挂载或未设置 HL_APP_RESEARCH_REPORTS_PATH 时，只有 /api/v1/research/* 返回 503，
+# 其余页面照常工作。
+
+services:
+  web:
+    environment:
+      HL_APP_RESEARCH_REPORTS_PATH: /mnt/research-reports
+    volumes:
+      - ./hl-dashboard-pairs.example.json:/etc/hl-app/pairs.json:ro
+      - hl-adjustment-state:/var/lib/hl-trader
+      # 只读挂载完整快照根目录，保证旧正文 URL 在新快照生成后仍然可访问。
+      - ${HL_APP_RESEARCH_REPORTS_HOST_PATH:?set the snapshot root path}:/mnt/research-reports:ro

@@ -1,0 +1,20 @@
+schema_version: 2
+entity_id: company:microsoft
+kind: company
+name: Microsoft
+aliases:
+- MSFT
+- 微软
+securities:
+- market: US
+  mic: XNAS
+  symbol: MSFT
+primary_document: MSFT.md
+documents: []
+related_entities: []
+sections:
+  thesis: null
+  risks: null
+  metrics: null
+  open_questions: null
+  research_metadata: null

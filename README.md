@@ -230,6 +230,40 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 
 初始化使用 `python -m hl_app.news_sync bootstrap`，再以 `status` 核对，最后单独执行 `activate`；普通 worker 只从已保存 cursor 继续。`HL_APP_NEWS_SYNC_ENABLED` 默认 false，上游 token 只注入 worker。migration `013_stock_data_news_sync.sql` 提供同步状态、事件收据、来源映射和上游 gap 投影。当前实现尚未真实联调或启用，详见 [同步合同](docs/STOCK_DATA_NEWS_SYNC_CONTRACT.md)。
 
+### 公司研究 HTML 报告
+
+网站主导航的「公司研究」是登录后的内部阅读入口，只展示研究库唯一索引 `研究流程/索引/html-index.json` 已登记的公司 HTML 报告。纳入条件同时满足：`entity_id` 属于 `company:`、`report_type` 为 `company_research`/`topic`/`update`、`status` 为 `draft` 或 `ready`，且登记入口是真实可读取的 HTML 普通文件。`demo`、`archived`、非公司主题、只有 Markdown 的公司都不出现；只有专题或局部更新的公司同样出现，不要求先有主报告。
+
+公司按 `entity_id` 合并，跨目录的同公司报告归为一组；组内主报告优先，其余按登记更新日倒序，未知日期置后。`status` 与 `content_status` 分开展示：草稿可阅读，`partial` 显示「有研究缺口」，`unreviewed` 显示「尚未核验」。公司名称、别名和证券来自同一源快照中的 `research.yaml`（可选身份信息）；缺失时保留报告，展示名称回退为已登记报告标题，不根据目录名伪造证券代码。
+
+读取方式是「源索引 → 本地生成不可变展示快照 → Web 只读提供」。浏览器请求不遍历研究库、不执行研究脚本、不访问数据商、不执行 Git pull。快照在容器外生成：
+
+```sh
+.venv/bin/python -m hl_app.research_reports snapshot \
+  --source /absolute/path/to/stock-research \
+  --output /absolute/path/to/research-reports
+```
+
+生成过程校验索引 Schema、必需字段、重复 ID 与路径，逐篇核对入口和获准资源，记录每篇报告的可用性与未发布链接诊断；单个报告损坏只排除该报告，索引整体损坏或候选全部失效时不切换当前快照指针，合法空索引产生明确的空快照。快照 ID 由实际复制内容的哈希派生，实际消费到的 `research.yaml` 身份信息同样参与指纹，来源记录区分已提交提交号与工作树改动，不把 HEAD 冒充当前正文版本；索引登记哈希缺失时只记录实际哈希、不回填源索引，登记的非空哈希与正文不符则排除该报告。生成产物的目录权限为 `0755`、文件权限为 `0644`，保证 Web 容器用户（UID 10001）在只读挂载下可读清单与正文；读取权限异常按服务不可用（503）返回。
+
+展示快照格式现为 v2，研究库源索引仍为 v1。修复前生成的 v1 展示快照需用同一源库重新生成，不能直接作为新版读取器的产物；原始 HTML 与展示副本分别保存在 `originals/` 与 `content/`，正文哈希和展示哈希分别登记。仅对已登记报告启用用户点击后的外层导航，不开放脚本或同源权限。
+
+Web 通过 `HL_APP_RESEARCH_REPORTS_PATH` 指向快照根目录，与 AI 读取 Markdown 用的 `HL_APP_RESEARCH_REPO_PATH` 分开。未配置时只有 `/api/v1/research/*` 返回 503，其余页面照常工作；空目录或无当前快照同样按不可用处理，不伪装成「没有研究」。Web 按当前快照读取列表，不要求重启；旧快照保留，已打开的报告不随新快照替换正文。
+
+隔离口径：列表、详情、正文和每个资源请求都执行 `require_session`；正文以 `iframe sandbox="allow-top-navigation-by-user-activation"` 展示（不开放 `allow-same-origin`），响应同时带 CSP sandbox、禁用脚本/连接/表单、正确 MIME、`Cache-Control: private, no-store` 和 `X-Content-Type-Options: nosniff`，直接打开正文 URL 同样受这些响应头约束。路径归一化后必须同时命中快照目录和文件白名单，拒绝目录浏览、绝对路径、路径穿越、双重编码和符号链接越界。
+
+sandbox frame 是 opaque origin，frame 内子资源请求不带会话 Cookie，因此快照为每篇报告生成「展示副本」：获准图片、CSS 及其递归依赖内联为 data URI，独立样式表转为内联 `<style>`，原始 HTML 原样保留在快照 `originals/`，变换记录在 manifest。报告内同公司链接重写为外层应用报告路由（带 `?snapshot=`），只在用户手势后由外层页面接管导航。外部来源由外层受控入口打开，未发布附件只显示说明、不提供下载。报告内的打印按钮、目录高亮等脚本增强第一版不保证工作，不提供放开脚本的开关。
+
+Docker 用独立 override 示例把快照根目录只读挂载到 Web，不要求生产容器读取整份研究仓库，也不把研究内容打进前端包：
+
+```sh
+HL_APP_RESEARCH_REPORTS_HOST_PATH=/absolute/path/to/research-reports \
+  docker compose --env-file .runtime/docker.env \
+    -f compose.yaml -f compose.research-reports.yaml up -d web
+```
+
+更新报告后重新生成快照并显式同步即可，无需重建前端。完整实现边界与验收条件见 [公司研究方案](docs/COMPANY_RESEARCH_HTML_PLAN.md)。
+
 ### Pair 止盈止损监控与人工平仓
 
 pair 详情页可按当前登录用户、pair 和账户配置整体止盈/止损 USD 金额。独立 worker 默认每 30 秒读取最新两腿持仓，以未实现盈亏之和判断阈值；数据缺失、过期或身份不一致时不触发。达到条件后页面显示提醒和“预览并人工平仓”，复用目标为 `0` 的调仓弹窗，由用户重新核对并签名，监控 worker 不持有私钥、不发送订单。规则、触发和人工执行结果持久化，重复检查不会重复生成提醒；worker 停止或状态过期时页面明确提示。

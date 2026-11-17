@@ -7,6 +7,8 @@ import { LoginPage } from "@/pages/login-page";
 import { WatchlistPage } from "@/pages/watchlist-page";
 import { NewsPage } from "@/pages/news-page";
 import { ChangelogPage } from "@/pages/changelog-page";
+import { ResearchPage } from "@/pages/research-page";
+import { ResearchReportPage } from "@/pages/research-report-page";
 import { Button } from "@/components/ui/button";
 import { sessionApi } from "@/lib/api/client";
 
@@ -38,6 +40,7 @@ function ProtectedLayout() {
             <NavLink to="/hyperliquid" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>Hyperliquid</NavLink>
             <NavLink to="/watchlist" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>关注股</NavLink>
             <NavLink to="/news" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>每日资讯</NavLink>
+            <NavLink to="/research" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>公司研究</NavLink>
             <NavLink to="/changelog" className={({ isActive }) => isActive ? "font-semibold text-primary" : ""}>更新日志</NavLink>
           </nav>
           <Button variant="outline" size="sm" onClick={() => void logout()}>退出</Button>
@@ -58,6 +61,8 @@ export default function App() {
         <Route path="/hyperliquid/pairs/:pairId" element={<HyperliquidPairPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/news" element={<NewsPage />} />
+        <Route path="/research" element={<ResearchPage />} />
+        <Route path="/research/reports/:reportId" element={<ResearchReportPage />} />
         <Route path="/changelog" element={<ChangelogPage />} />
         <Route path="/" element={<Navigate to="/hyperliquid" replace />} />
         <Route path="*" element={<Navigate to="/hyperliquid" replace />} />

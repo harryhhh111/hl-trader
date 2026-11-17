@@ -12,7 +12,7 @@ from .account_auth import AccountAuthService
 from .auth import AuthService, CloudflareAccessService
 from .config import Settings
 from .db import WebLifecycle
-from .routes import ai, hyperliquid, news, session, watchlist
+from .routes import ai, hyperliquid, news, research, session, watchlist
 from .services import hyperliquid_managed_adjustments
 
 
@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
     app.include_router(watchlist.router, prefix="/api/v1")
     app.include_router(news.router, prefix="/api/v1")
     app.include_router(ai.router, prefix="/api/v1")
+    app.include_router(research.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     def health() -> dict[str, dict[str, str]]:

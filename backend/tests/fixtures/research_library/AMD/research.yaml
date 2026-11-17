@@ -1,0 +1,19 @@
+schema_version: 2
+entity_id: company:amd
+kind: company
+name: Advanced Micro Devices
+aliases:
+- AMD
+securities:
+- market: US
+  mic: XNAS
+  symbol: AMD
+primary_document: AMD.md
+documents: []
+related_entities: []
+sections:
+  thesis: null
+  risks: null
+  metrics: null
+  open_questions: null
+  research_metadata: null

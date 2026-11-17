@@ -59,6 +59,7 @@ try {
     HL_APP_PAIRS_CONFIG: seed.pairs,
     HL_APP_EXECUTION_STATE_DIR: path.join(pg, "hl-state"),
     HL_APP_RESEARCH_REPO_PATH: seed.research,
+    HL_APP_RESEARCH_REPORTS_PATH: seed.research_snapshot,
     HL_APP_MMX_BIN: seed.mmx,
     HL_APP_MMX_MODEL: "fixture-model",
     HL_APP_COLLECTORS_ENABLED: "false",

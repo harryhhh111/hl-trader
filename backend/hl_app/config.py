@@ -43,6 +43,7 @@ class Settings:
     trusted_origins: tuple[str, ...]
     host: str
     port: int
+    research_reports_path: str | None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -123,4 +124,5 @@ class Settings:
             trusted_origins=origins,
             host=host,
             port=port,
+            research_reports_path=optional_value("HL_APP_RESEARCH_REPORTS_PATH", source),
         )
