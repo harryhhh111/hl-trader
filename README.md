@@ -262,7 +262,7 @@ HL_APP_RESEARCH_REPORTS_HOST_PATH=/absolute/path/to/research-reports \
     -f compose.yaml -f compose.research-reports.yaml up -d web
 ```
 
-更新报告后重新生成快照并显式同步即可，无需重建前端。完整实现边界与验收条件见 [公司研究方案](docs/COMPANY_RESEARCH_HTML_PLAN.md)。
+更新报告后重新生成快照并显式同步即可，无需重建前端。完整实现边界与验收条件见 [公司研究方案](docs/COMPANY_RESEARCH_HTML_PLAN.md)。 2026-11-17 已在当前 hl-app 部署该功能，正式接入 3 家公司、5 篇报告；版本、核验范围和回退准备见[部署记录](docs/deployment/COMPANY_RESEARCH_2026_11_17.md)。
 
 ### Pair 止盈止损监控与人工平仓
 

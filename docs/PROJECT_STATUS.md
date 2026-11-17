@@ -18,7 +18,7 @@
 | 逐仓保证金补足 | isolated 仓位低于名义价值 80% 时显示比例和所需金额，由用户通过托管或浏览器 API Wallet 人工确认；签名前后及执行后核对实际仓位和保证金 | 代码已实现，尚未部署或真实联调；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |
 | 阈值再平衡（人工版） | 固定目标、连续两次偏离确认、候选腿只读预览、冷却和人工执行回写；未超阈值腿不动，风险退出优先。已部署，真实订单仍需验收 | `8f89e69`；[阈值再平衡合同](HYPERLIQUID_THRESHOLD_REBALANCING.md)；migration `012` |
 | stock_data 资讯同步消费端 | 严格 DTO、来源映射、事件收据、页事务、bootstrap/status/activate 与 worker 已在当前代码实现；同步来源不进入本地直接采集。尚未部署或真实联调 | [同步合同](STOCK_DATA_NEWS_SYNC_CONTRACT.md)；migration `013` |
-| 公司研究 HTML 阅读 | 源索引 → 本地不可变快照 → Web 只读提供；公司列表、报告阅读页、快照 CLI 与隔离响应头已实现，只展示索引登记的公司 HTML 报告。已按[独立验收复验](COMPANY_RESEARCH_HTML_ACCEPTANCE.md)修复快照读取权限、隔离区图片与样式交付、身份指纹、登记哈希与必需资源检查；尚未部署或真实接入研究库 | [公司研究方案](COMPANY_RESEARCH_HTML_PLAN.md) |
+| 公司研究 HTML 阅读 | 源索引 → 本地不可变快照 → Web 只读提供；公司列表、报告阅读页、快照 CLI 与隔离响应头已实现，只展示索引登记的公司 HTML 报告。已按[独立验收复验](COMPANY_RESEARCH_HTML_ACCEPTANCE.md)修复快照读取权限、隔离区图片与样式交付、身份指纹、登记哈希与必需资源检查；2026-11-17 已部署 Web 与 gateway，正式快照为 3 家公司、5 篇报告；线上账号浏览器操作未另行验收 | [公司研究方案](COMPANY_RESEARCH_HTML_PLAN.md)；[部署记录](deployment/COMPANY_RESEARCH_2026_11_17.md) |
 
 当前有序数据库迁移为 `001`–`013`。新增代码或迁移文件不代表运行环境已经应用；执行迁移、重建容器和变更真实交易配置仍需明确授权。
 
