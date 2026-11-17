@@ -11,6 +11,7 @@ import {
   CONTENT_STATUS_LABEL,
   REPORT_TYPE_LABEL,
   filterResearchCompanies,
+  companyEntryReport,
   formatResearchDate,
   safeExternalUrl,
 } from "@/lib/types/research";
@@ -128,23 +129,33 @@ test("搜索覆盖公司名称、别名、证券代码与报告标题", () => {
   assert.deepEqual(filterResearchCompanies([microsoft, qxo], "不存在的公司"), []);
 });
 
-test("按报告标题命中时只保留命中的报告", () => {
+test("按专题标题搜索保留完整公司，入口始终优先主报告", () => {
   const filtered = filterResearchCompanies([microsoft], "传统软件");
-  assert.equal(filtered[0].reports.length, 1);
-  assert.equal(filtered[0].reports[0].report_id, "msft-topic");
+  assert.equal(filtered[0].reports.length, 2);
+  assert.equal(filtered[0].report_count, 2);
+  assert.equal(companyEntryReport(filtered[0])?.report_id, "msft-main");
 });
 
-test("公司列表展示公司名、证券、报告数量、状态与三个登记日期", () => {
+test("每家公司只有一个入口，不展开报告、别名及财务日期", () => {
   const html = renderList();
   assert.match(html, /Microsoft/);
-  assert.match(html, /MSFT（US\/XNAS）/);
-  assert.match(html, /2 篇报告/);
-  assert.match(html, /共 2 家公司 · 3 篇报告/);
-  assert.match(html, /文档更新 未登记/);
-  assert.match(html, /财务截止 2026-09-30/);
-  assert.match(html, /行情截止 2026-11-16/);
+  assert.match(html, /MSFT/);
+  assert.match(html, /共 2 家公司/);
+  assert.match(html, /更新 未登记/);
+  assert.doesNotMatch(html, /篇报告|别名：|财务截止|行情截止/);
+  assert.doesNotMatch(html, /微软：软件现金流与AI资本回报|微软：传统软件与现金流/);
   assert.match(html, /有研究缺口/);
-  assert.match(html, /href="\/research\/reports\/msft-main"/);
+  const entries = [...html.matchAll(/href="\/research\/reports\/([^\"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(entries, ["msft-main", "qxo-main"]);
+});
+
+test("三篇报告仍只有一个公司入口；只有专题的公司也能进入", () => {
+  const topic = report({ report_id: "msft-topic", report_type: "topic" });
+  const company = { ...microsoft, reports: [topic, report(), report({ report_id: "msft-experiment", report_type: "topic" })] };
+  assert.equal(companyEntryReport(company)?.report_id, "msft-main");
+  const topicOnly = { ...microsoft, reports: [topic] };
+  assert.equal(companyEntryReport(topicOnly)?.report_id, "msft-topic");
+  assert.equal(companyEntryReport({ ...microsoft, reports: [] }), undefined);
 });
 
 test("搜索条件保留在 URL 中并随报告链接传递", () => {

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
-import { BookOpen, FileText, RefreshCw, Search } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { BookOpen, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { researchApi } from "@/lib/api/research";
 import { PageHeader } from "@/components/layout/page-header";
@@ -11,6 +11,7 @@ import {
   CONTENT_STATUS_LABEL,
   REPORT_TYPE_LABEL,
   filterResearchCompanies,
+  companyEntryReport,
   formatResearchDate,
   type ResearchReportSummary,
 } from "@/lib/types/research";
@@ -59,7 +60,7 @@ export function ResearchPage() {
       <PageHeader
         icon={BookOpen}
         title="公司研究"
-        description="只展示研究库已登记的公司 HTML 报告；草稿可阅读，未知日期保持未知。"
+        description="按公司查看研究报告"
       >
         <Button variant="outline" onClick={() => void companies.refetch()}>
           <RefreshCw className="w-4 h-4 mr-2" />刷新
@@ -85,7 +86,7 @@ export function ResearchPage() {
         )}
         {companies.data && (
           <span className="text-xs text-muted-foreground">
-            共 {companies.data.totals.companies} 家公司 · {companies.data.totals.reports} 篇报告
+            {query ? `匹配 ${visible.length} 家公司` : `共 ${companies.data.totals.companies} 家公司`}
           </span>
         )}
       </div>
@@ -105,48 +106,45 @@ export function ResearchPage() {
         </Card>
       )}
 
-      <div className="space-y-4">
-        {visible.map((company) => (
-          <Card key={company.entity_id}>
-            <CardContent className="py-4 space-y-3">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h3 className="text-base font-semibold">{company.name}</h3>
-                {company.securities.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    {company.securities.map((item) => `${item.symbol}（${item.market}/${item.mic}）`).join("、")}
+      {visible.length > 0 && (
+        <ul aria-label="公司研究列表" className="divide-y rounded-lg border bg-card">
+          {visible.map(company => {
+            const report = companyEntryReport(company);
+            if (!report) return null;
+            return (
+              <li key={company.entity_id}>
+                <Link
+                  to={`/research/reports/${encodeURIComponent(report.report_id)}${query ? `?q=${encodeURIComponent(query)}` : ""}`}
+                  aria-label={`阅读 ${company.name} 的公司研究`}
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <h3 className="break-words text-sm font-medium">{company.name}</h3>
+                      {company.securities.length > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {company.securities.map(item => item.symbol).join("、")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {report.status === "draft" ? "草稿" : "可阅读"} · {CONTENT_STATUS_LABEL[report.content_status]}
                   </span>
-                )}
-                {company.aliases.length > 0 && (
-                  <span className="text-xs text-muted-foreground">别名：{company.aliases.join("、")}</span>
-                )}
-                <span className="text-xs text-muted-foreground ml-auto">{company.report_count} 篇报告</span>
-              </div>
-              <ul className="divide-y">
-                {company.reports.map((report) => (
-                  <li key={report.report_id} className="py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <a
-                      href={`/research/reports/${encodeURIComponent(report.report_id)}${query ? `?q=${encodeURIComponent(query)}` : ""}`}
-                      className="text-sm font-medium hover:text-primary"
-                    >
-                      {report.title}
-                    </a>
-                    <ReportBadges report={report} />
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      文档更新 {formatResearchDate(report.document_updated_at)} · 财务截止 {formatResearchDate(report.financial_as_of)} · 行情截止{" "}
-                      {formatResearchDate(report.market_as_of)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+                    更新 {formatResearchDate(report.document_updated_at)}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {companies.data && companies.data.diagnostics.excluded_count > 0 && (
-        <section className="space-y-1 border-t pt-4">
-          <h2 className="text-sm font-semibold">未进入列表的登记项</h2>
+        <details className="space-y-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">收录说明</summary>
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {companies.data.diagnostics.excluded.map((item, index) => (
               <li key={`${item.report_id}-${index}`}>
@@ -155,7 +153,7 @@ export function ResearchPage() {
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       )}
     </div>
   );

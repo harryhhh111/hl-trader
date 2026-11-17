@@ -20,17 +20,21 @@ async function snapshotId(page) {
   return (await response.json()).data.snapshot_id;
 }
 
-test("公司研究列表按公司分组展示报告并支持搜索", async ({ page }, testInfo) => {
+test("公司研究列表紧凑展示，每家公司一个入口并支持搜索", async ({ page }, testInfo) => {
   await login(page);
   await page.getByRole("link", { name: "公司研究", exact: true }).click();
   await expect(page).toHaveURL(/\/research$/);
   await expect(page.getByRole("heading", { name: "公司研究", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Oracle", exact: true })).toBeVisible();
-  await expect(page.getByText("ORCL（US/XNAS）", { exact: true })).toBeVisible();
-  await expect(page.getByText("2 篇报告", { exact: true })).toBeVisible();
-  await expect(page.getByText("甲骨文：OCI 与 RPO", { exact: true })).toBeVisible();
-  await expect(page.getByText("文档更新 2026-11-17", { exact: false })).toBeVisible();
-  await expect(page.getByText("尚未核验", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("ORCL", { exact: true })).toBeVisible();
+  const companies = page.getByRole('list', { name: '公司研究列表' });
+  await expect(companies.getByRole('link')).toHaveCount(1);
+  await expect(companies.getByRole('listitem')).toHaveCount(1);
+  await expect(companies.getByRole('link')).toHaveAttribute('href', '/research/reports/orcl-main');
+  expect((await companies.getByRole('listitem').boundingBox()).height).toBeLessThanOrEqual(80);
+  await expect(page.getByText("甲骨文：OCI 与 RPO", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("更新 2026-11-17", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("草稿 · 尚未核验", { exact: true })).toBeVisible();
   // 演示报告不进入公司列表
   await expect(page.getByText("演示报告", { exact: true })).toHaveCount(0);
 
@@ -50,7 +54,7 @@ test("公司研究列表按公司分组展示报告并支持搜索", async ({ pa
 test("阅读页展示报告信息、同公司切换和新页面阅读入口", async ({ page }) => {
   await login(page);
   await page.goto("/research?q=%E7%94%B2%E9%AA%A8%E6%96%87");
-  await page.getByRole("link", { name: "甲骨文：OCI 与 RPO", exact: true }).click();
+  await page.getByRole("link", { name: "阅读 Oracle 的公司研究", exact: true }).click();
   await expect(page).toHaveURL(/\/research\/reports\/orcl-main\?q=/);
   await expect(page.getByRole("heading", { name: "甲骨文：OCI 与 RPO", exact: true })).toBeVisible();
   await expect(page.getByText("文档更新日", { exact: true })).toBeVisible();
@@ -73,6 +77,23 @@ test("阅读页展示报告信息、同公司切换和新页面阅读入口", as
   await expect(page).toHaveURL(/\/research\?q=/);
   await expect(page.getByLabel("搜索公司或报告")).toHaveValue("甲骨文");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
+});
+
+test("搜索专题标题仍进入公司主报告，其他报告在阅读页切换", async ({ page }) => {
+  await login(page);
+  await page.goto('/research');
+  await page.getByLabel('搜索公司或报告').fill('云合同');
+  const companies = page.getByRole('list', { name: '公司研究列表' });
+  await expect(companies.getByRole('link')).toHaveCount(1);
+  await expect(companies.getByRole('link')).toHaveAttribute('href', /\/research\/reports\/orcl-main\?q=/);
+  await companies.getByRole('link').click();
+  await expect(page.getByRole('heading', { name: '甲骨文：OCI 与 RPO', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '甲骨文：云合同结构', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '甲骨文：云合同结构', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '甲骨文：云合同结构', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '返回公司研究', exact: true }).click();
+  await expect(page.getByLabel('搜索公司或报告')).toHaveValue('云合同');
+  await expect(page.getByRole('list', { name: '公司研究列表' }).getByRole('link')).toHaveCount(1);
 });
 
 test("报告正文在隔离区域实际渲染并保留中文、表格、目录锚点与折叠区", async ({ page }) => {

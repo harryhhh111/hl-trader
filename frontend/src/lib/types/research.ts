@@ -92,18 +92,14 @@ export function matchesResearchQuery(company: ResearchCompany, query: string): b
 }
 
 export function filterResearchCompanies(companies: ResearchCompany[], query: string): ResearchCompany[] {
-  return companies
-    .map((company) => {
-      const needle = query.trim().toLowerCase();
-      if (!needle) return company;
-      const companyHit =
-        [company.name, ...company.aliases, ...company.securities.map((item) => item.symbol)]
-          .some((value) => value.toLowerCase().includes(needle));
-      if (companyHit) return company;
-      const reports = company.reports.filter((item) => item.title.toLowerCase().includes(needle));
-      return reports.length > 0 ? { ...company, reports, report_count: reports.length } : null;
-    })
-    .filter((company): company is ResearchCompany => company !== null);
+  // Search selects companies, without changing their entry or hiding siblings.
+  return companies.filter(company => matchesResearchQuery(company, query));
+}
+
+export function companyEntryReport(company: ResearchCompany): ResearchReportSummary | undefined {
+  // The API orders reports by type/date/ID. Prefer the registered main report;
+  // a company with topics or updates only still has one usable entry.
+  return company.reports.find(report => report.report_type === "company_research") ?? company.reports[0];
 }
 
 /** 只允许 http/https 外部来源，受控外层入口使用。 */
