@@ -79,6 +79,7 @@ const detail: ResearchReportDetail = {
   company: { entity_id: "company:microsoft", name: "Microsoft", aliases: ["MSFT"], securities: microsoft.securities },
   sibling_reports: [report({ report_id: "msft-topic", title: "微软：传统软件与现金流", report_type: "topic" })],
   content_url: "/api/v1/research/content/s11111111111111111111111111111111/MSFT/MSFT.html",
+  document_html: "<!doctype html><html><body>报告正文</body></html>",
   unpublished_links: [{ path: "MSFT/factcheck/data/inputs.json", reference: "factcheck/data/inputs.json", reason: "发布范围尚未审核" }],
   external_links: [{ url: "https://www.microsoft.com/investor", label: "微软投资者关系" }],
   diagnostics: [{ code: "script_present", severity: "info", message: "报告包含脚本；静态阅读模式不执行脚本。" }],
@@ -158,7 +159,7 @@ test("列表为空时给出明确提示而不是伪装成没有研究", () => {
   assert.doesNotMatch(html, /Microsoft/);
 });
 
-test("阅读页展示报告信息、同公司报告、未发布资料与隔离正文区域", () => {
+test("阅读页展示报告信息和阅读准备状态，不展示未发布资料", () => {
   const qc = new QueryClient();
   qc.setQueryData(["research-report", "msft-main"], detail);
   const html = renderToString(
@@ -176,13 +177,11 @@ test("阅读页展示报告信息、同公司报告、未发布资料与隔离�
   assert.match(markup, /未登记/);
   assert.match(markup, /同公司其他报告/);
   assert.match(markup, /微软：传统软件与现金流/);
-  assert.match(markup, /未发布资料/);
-  assert.match(markup, /发布范围尚未审核/);
+  assert.doesNotMatch(markup, /未发布资料/);
+  assert.doesNotMatch(markup, /发布范围尚未审核/);
   assert.match(markup, /外部来源/);
   assert.match(markup, /href="https:\/\/www.microsoft.com\/investor"/);
-  assert.match(markup, /sandbox="allow-top-navigation-by-user-activation"/);
-  assert.match(markup, /referrerPolicy="no-referrer"/);
-  assert.match(markup, /src="\/api\/v1\/research\/content\/s11111111111111111111111111111111\/MSFT\/MSFT.html"/);
+  assert.match(markup, /正在准备报告正文/);
   assert.match(markup, /返回公司研究/);
 });
 

@@ -53,6 +53,7 @@ export interface ResearchReportDetail {
   };
   sibling_reports: ResearchReportSummary[];
   content_url: string;
+  document_html: string;
   unpublished_links: { path: string; reference: string; reason: string }[];
   external_links: { url: string; label: string }[];
   diagnostics: { code: string; severity: string; message: string }[];
@@ -108,4 +109,10 @@ export function filterResearchCompanies(companies: ResearchCompany[], query: str
 /** 只允许 http/https 外部来源，受控外层入口使用。 */
 export function safeExternalUrl(url: string): string | null {
   return /^https?:\/\//.test(url) ? url : null;
+}
+
+/** Blob documents have no HTTP base URL; resolve only the registered reader links. */
+export function absoluteReaderLinks(html: string, origin: string): string {
+  return html.replace(/(\bhref=")(\/research\/reports\/[^\"]*)"/gi,
+    (_match, prefix, path) => `${prefix}${origin}${path}"`);
 }

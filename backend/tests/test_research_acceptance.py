@@ -177,3 +177,39 @@ def test_duplicate_json_keys_are_not_silently_overwritten(library, tmp_path):
     path.write_text(path.read_text().replace('"schema_version": 1', '"schema_version": 2, "schema_version": 1'))
     with pytest.raises(reports.ResearchIndexError, match='重复 JSON'):
         reports.build_snapshot(library, tmp_path / 'output')
+
+
+def test_reader_document_is_authenticated_json_with_static_policy(snapshot_root):
+    response = _client(snapshot_root).get('/api/v1/research/reports/msft-main')
+    assert response.status_code == 200
+    assert response.headers['cache-control'] == 'private, no-store'
+    document = response.json()['data']['document_html']
+    assert document.lower().startswith('<!doctype html>')
+    assert '微软：软件现金流与AI资本回报' in document
+    assert document.index('Content-Security-Policy') < document.index('</head>')
+    assert 'script-src &#x27;none&#x27;' in document
+    assert 'connect-src &#x27;none&#x27;' in document
+    assert 'frame-ancestors' not in document
+    assert '<script' not in document
+
+
+@pytest.mark.parametrize('document', [
+    '<!doctype html><html><head><title>x</title></head><body>x</body></html>',
+    '<!doctype html><html><body>x</body></html>',
+    '<!doctype html><p>x</p>', '<p>x</p>',
+    '<!doctype html><!-- <head> --><html><head><title>x</title></head></html>',
+])
+def test_static_policy_placement_preserves_doctype_and_ignores_comment_heads(document):
+    from hl_app.services.research_display import with_document_policy
+    from html.parser import HTMLParser
+    class Meta(HTMLParser):
+        def __init__(self): super().__init__(); self.policies = []
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'meta' and attrs.get('http-equiv') == 'Content-Security-Policy':
+                self.policies.append(attrs['content'])
+    result = with_document_policy(document, "default-src 'none'; script-src 'none'")
+    if document.startswith('<!doctype html>'):
+        assert result.startswith('<!doctype html>')
+    parser = Meta(); parser.feed(result)
+    assert parser.policies == ["default-src 'none'; script-src 'none'"]

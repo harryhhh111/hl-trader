@@ -44,7 +44,7 @@ test("正文中的报告链接打开同一快照阅读页并保留章节锚点",
   await expect(page).toHaveURL(new RegExp(`/research/reports/orcl-topic\\?snapshot=${metadata.data.snapshot_id}#contracts$`));
   await expect(page.getByRole("heading", { name: "甲骨文：云合同结构", exact: true })).toBeVisible();
   await expect(page.frameLocator("iframe").locator("#contracts")).toBeVisible();
-  await expect(page.locator("iframe")).toHaveAttribute("src", /topic\.html#contracts$/);
+  await expect(page.locator("iframe")).toHaveAttribute("src", /^blob:.*#contracts$/);
 });
 
 test("修复资源交付后表单仍被禁止，退出后正文与附件仍需认证", async ({ page }) => {
@@ -59,4 +59,38 @@ test("修复资源交付后表单仍被禁止，退出后正文与附件仍需�
   await expect(page).toHaveURL(/\/login$/);
   expect((await page.request.get(metadata.content_url)).status()).toBe(401);
   expect((await page.request.get(`/api/v1/research/content/${metadata.snapshot_id}/ORCL/assets/chart.png`)).status()).toBe(401);
+});
+
+test("公网入口禁止 HTTP 页面被嵌入时，正文仍通过鉴权 JSON 在隔离框内可读", async ({ page }) => {
+  const directDocuments = [];
+  const frameErrors = [];
+  page.on('console', message => {
+    if (message.type() === 'error' && /frame-ancestors/.test(message.text())) frameErrors.push(message.text());
+  });
+  await page.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith('/api/v1/research/content/')) {
+      directDocuments.push(url.pathname);
+      await route.fulfill({ status: 403, contentType: 'text/html',
+        headers: { 'Content-Security-Policy': "frame-ancestors 'none'", 'cf-mitigated': 'challenge' },
+        body: '<html><body>Access verification page</body></html>' });
+      return;
+    }
+    const response = await route.fetch();
+    await route.fulfill({ response,
+      headers: { ...response.headers(), 'content-security-policy': "frame-ancestors 'none'" } });
+  });
+  await openReport(page);
+  await expect(page.getByRole('heading', { name: '未发布资料', exact: true })).toHaveCount(0);
+  await expect(page.locator('iframe')).toHaveAttribute('src', /^blob:/);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.getByText('52,961', { exact: true })).toBeVisible();
+  await expect.poll(() => frame.getByAltText('收入趋势图').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  await expect(frame.locator('#style-proof')).toHaveCSS('color', 'rgb(1, 2, 3)');
+  await expect(frame.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /script-src 'none'/);
+  expect(directDocuments).toEqual([]);
+  expect(frameErrors).toEqual([]);
+  await frame.getByRole('link', { name: '同公司专题', exact: true }).click();
+  await expect(page).toHaveURL(/\/research\/reports\/orcl-topic\?snapshot=.*#contracts$/);
+  await expect(page.frameLocator('iframe').locator('#contracts')).toBeVisible();
 });

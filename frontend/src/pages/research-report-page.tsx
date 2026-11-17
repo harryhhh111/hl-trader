@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink, FileWarning, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { ApiError } from "@/lib/api/client";
 import { researchApi } from "@/lib/api/research";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { ReportBadges } from "@/pages/research-page";
 import {
   formatResearchDate,
   safeExternalUrl,
+  absoluteReaderLinks,
   type ResearchReportSummary,
 } from "@/lib/types/research";
 
@@ -21,6 +23,38 @@ function DateRow({ label, value }: { label: string; value: string | null }) {
       <span className="text-muted-foreground">{label}</span>
       <span className={value ? "" : "text-muted-foreground"}>{formatResearchDate(value)}</span>
     </div>
+  );
+}
+
+export function ReportDocument({ html, title, fragment }: { html: string; title: string; fragment: string }) {
+  const [document, setDocument] = useState<{ html: string; url: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+    if (typeof html !== "string" || !html.trim()) {
+      setFailed(true);
+      return;
+    }
+    try {
+      const documentHtml = absoluteReaderLinks(html, window.location.origin);
+      const url = URL.createObjectURL(new Blob([documentHtml], { type: "text/html;charset=utf-8" }));
+      setDocument({ html, url });
+      return () => URL.revokeObjectURL(url);
+    } catch {
+      setFailed(true);
+    }
+  }, [html]);
+  if (failed) return <p role="alert">报告阅读区域初始化失败，请刷新页面重试。</p>;
+  if (!document || document.html !== html) return <p className="text-sm text-muted-foreground">正在准备报告正文…</p>;
+  return (
+    <iframe
+      title={title}
+      src={document.url + fragment}
+      sandbox="allow-top-navigation-by-user-activation"
+      referrerPolicy="no-referrer"
+      className="w-full rounded-md border bg-white"
+      style={{ height: "calc(100vh - 220px)", minHeight: "480px" }}
+    />
   );
 }
 
@@ -111,27 +145,6 @@ export function ResearchReportPage() {
               </Card>
             )}
 
-            {data.unpublished_links.length > 0 && (
-              <Card>
-                <CardContent className="py-4 space-y-2">
-                  <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <FileWarning className="h-4 w-4 text-amber-600" />未发布资料
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    以下资料尚未纳入发布范围，展示页不提供访问；原始链接保留在源报告中。
-                  </p>
-                  <ul className="space-y-1 text-xs">
-                    {data.unpublished_links.map((item) => (
-                      <li key={`${item.reference}-${item.path}`} className="text-muted-foreground">
-                        <span className="font-mono">{item.reference}</span>
-                        <span className="block">{item.reason}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
             {data.external_links.length > 0 && (
               <Card>
                 <CardContent className="py-4 space-y-2">
@@ -164,14 +177,7 @@ export function ResearchReportPage() {
               <h2 className="text-sm font-semibold">报告正文</h2>
               <span className="text-xs text-muted-foreground">静态阅读模式：不执行报告脚本，不加载外部资源</span>
             </div>
-            <iframe
-              title={data.report.title}
-              src={data.content_url + location.hash}
-              sandbox="allow-top-navigation-by-user-activation"
-              referrerPolicy="no-referrer"
-              className="w-full rounded-md border bg-white"
-              style={{ height: "calc(100vh - 220px)", minHeight: "480px" }}
-            />
+            <ReportDocument html={data.document_html} title={data.report.title} fragment={location.hash} />
           </div>
         </div>
       )}

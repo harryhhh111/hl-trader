@@ -21,6 +21,44 @@ class DisplayError(ValueError):
 
 DISPLAY_REVISION = 1
 MAX_EMBEDDED_BYTES = 64 * 1024 * 1024
+
+
+def with_document_policy(document: str, policy: str) -> str:
+    """Carry static restrictions into a browser-local document, without changing its doctype."""
+    class HeadLocation(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.head = self.root = self.doctype = None
+            self.offsets = [0]
+            for line in document.splitlines(keepends=True):
+                self.offsets.append(self.offsets[-1] + len(line))
+
+        def position(self):
+            line, column = self.getpos()
+            return self.offsets[line - 1] + column
+
+        def handle_starttag(self, tag, attrs):
+            end = self.position() + len(self.get_starttag_text())
+            if tag == 'head' and self.head is None:
+                self.head = end
+            if tag == 'html' and self.root is None:
+                self.root = end
+
+        def handle_decl(self, decl):
+            if decl.lower().startswith('doctype') and self.doctype is None:
+                self.doctype = self.position() + len(decl) + 3
+
+    location = HeadLocation()
+    location.feed(document)
+    location.close()
+    meta = '<meta http-equiv="Content-Security-Policy" content="' + html.escape(policy, quote=True) + '">'
+    if location.head is not None:
+        offset, addition = location.head, meta
+    elif location.root is not None:
+        offset, addition = location.root, '<head>' + meta + '</head>'
+    else:
+        offset, addition = location.doctype or 0, meta
+    return document[:offset] + addition + document[offset:]
 CSS_URL = re.compile(r"url\(\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s)]+))\s*\)", re.I)
 CSS_IMPORT = re.compile(
     r"@import\s+(?:url\(\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s)]+))\s*\)|\"([^\"]+)\"|'([^']+)')\s*([^;]*);",

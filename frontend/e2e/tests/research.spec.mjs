@@ -47,7 +47,7 @@ test("公司研究列表按公司分组展示报告并支持搜索", async ({ pa
   await page.screenshot({ path: `${evidence}/${testInfo.project.name}-research.png`, fullPage: true });
 });
 
-test("阅读页展示报告信息、同公司切换、未发布资料与受控外部来源", async ({ page }) => {
+test("阅读页展示报告信息、同公司切换与受控外部来源", async ({ page }) => {
   await login(page);
   await page.goto("/research?q=%E7%94%B2%E9%AA%A8%E6%96%87");
   await page.getByRole("link", { name: "甲骨文：OCI 与 RPO", exact: true }).click();
@@ -58,8 +58,8 @@ test("阅读页展示报告信息、同公司切换、未发布资料与受控�
   await expect(page.getByText("2026-11-14", { exact: true })).toBeVisible();
   await expect(page.getByText("同公司其他报告", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "甲骨文：云合同结构", exact: true })).toBeVisible();
-  await expect(page.getByText("未发布资料", { exact: true })).toBeVisible();
-  await expect(page.getByText("网站附件发布范围尚未审核", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "未发布资料", exact: true })).toHaveCount(0);
+  await expect(page.getByText("网站附件发布范围尚未审核", { exact: false })).toHaveCount(0);
   const source = page.getByRole("link", { name: "甲骨文投资者关系", exact: false });
   await expect(source).toHaveAttribute("href", "https://example.com/oracle-source");
   await expect(source).toHaveAttribute("rel", /noopener/);
@@ -116,7 +116,7 @@ test("获准图片在隔离区域内真实加载，不依赖 frame 内的会话�
   expect(image.scheme).toBe("data");
 
   // 正文文档必须真实返回 200，隔离区域内不得出现未授权的 401
-  expect(requests.length).toBeGreaterThan(0);
+  expect(requests).toEqual([]);
   for (const request of requests) {
     expect(request.status).toBe(200);
   }

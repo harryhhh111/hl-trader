@@ -14,6 +14,7 @@ from fastapi.responses import Response
 
 from ..auth import require_session
 from ..services import research_reports
+from ..services.research_display import with_document_policy
 
 router = APIRouter(dependencies=[Depends(require_session)])
 logger = logging.getLogger(__name__)
@@ -35,6 +36,10 @@ CONTENT_SECURITY_POLICY = (
     "base-uri 'none'; "
     "sandbox allow-top-navigation-by-user-activation; "
     "frame-ancestors 'self'"
+)
+DOCUMENT_SECURITY_POLICY = '; '.join(
+    directive.strip() for directive in CONTENT_SECURITY_POLICY.split(';')
+    if not directive.strip().startswith(('sandbox', 'frame-ancestors'))
 )
 
 
@@ -68,6 +73,18 @@ def report_detail(report_id: str, request: Request, response: Response, snapshot
     payload = research_reports.report_detail_payload(loaded, report_id)
     if payload is None:
         raise HTTPException(404, "报告不存在或不在当前快照内")
+    try:
+        entry = loaded.manifest.reports[report_id]
+        document, _ = research_reports.snapshot_content_bytes(loaded.root, loaded.snapshot_id, entry.entry_path)
+    except research_reports.ResearchSnapshotUnavailable as exc:
+        logger.warning('Research document unavailable: %s', exc)
+        raise HTTPException(503, '研究正文暂时不可读取') from exc
+    except research_reports.ResearchSnapshotError as exc:
+        raise HTTPException(404, '研究正文不存在或校验失败') from exc
+    # A normal authenticated JSON request traverses the same public access
+    # layer as the rest of the app. The reading frame does not navigate to an
+    # HTTP URL that an edge can replace with an unframeable verification page.
+    payload['document_html'] = with_document_policy(document.decode('utf-8'), DOCUMENT_SECURITY_POLICY)
     return {"data": payload}
 
 
