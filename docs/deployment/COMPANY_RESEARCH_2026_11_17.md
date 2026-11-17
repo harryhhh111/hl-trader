@@ -47,3 +47,20 @@ docker compose --env-file .runtime/docker.env \
 ## 回退准备
 
 旧镜像保留为 `hl-app-web:before-research-a9fd9e9` 和 `hl-app-gateway:before-research-a9fd9e9`。未执行回退；如需回退，经授权并确认无运行中的执行请求后恢复这两个镜像，再使用上述相同 Compose 文件以 `--no-deps` 重建 Web 与 gateway。worker 不需变更。旧版本不提供研究接口，正式快照文件可继续保留。
+
+## 公网正文嵌入修复（2026-11-17 16:34 UTC）
+
+用户在真实页面遇到 `frame-ancestors 'none'`，正文无法嵌入；原先的内网核验未覆盖公网登录后的完整阅读链路，这是上轮验收的遗漏。应用正常正文响应是 `frame-ancestors 'self'`；无凭据公网请求另外观察到 Cloudflare 403 验证页（`cf-mitigated: challenge`）。该探测不能确定登录用户命中哪条公网规则，但原来让 iframe 直接导航 HTTP 正文的方式没有适配实际公网响应。
+
+修复提交 `78d7986`：报告详情经原有鉴权 JSON 请求返回 `document_html`，浏览器生成本地 Blob 文档并交给受限 iframe。正文携带静态 CSP，iframe 继续禁止脚本与同源权限；报告的样式、图片、同快照链接及章节锚点保留。左侧“未发布资料”模块移除，后端仍保留登记与文件白名单。直接正文接口继续鉴权，不改变 Cloudflare 配置。
+
+本轮后端 302 项通过、前端研究单元测试及构建通过、浏览器 64 项通过和 2 项跳过。新增桌面/手机回归模拟全站 `frame-ancestors 'none'`、正文路径返回 403 验证页，验证实际内容显示与章节跳转。部署前在新镜像内验证 JSON 正文契约和静态 CSP；部署后确认实际 JS 使用 `document_html` / `createObjectURL`，且不含已移除的模块文案。
+
+- Web 镜像：`sha256:0d47de6b81e93c59e0fb9aefdf46718cd8dc7176a42baff153095e6b810f55f2`。
+- gateway 镜像：`sha256:28d03fbf19dff2a61345086c6f8aa1003e2edbf77614182da8ff5bb61978130c`。
+- 实际前端资源：`/assets/index-mdIkVxIq.js`。
+- 快照沿用 `s93b5af9e66c56961c352130ff2592aa1`，仍为 3 家公司、5 篇报告；应用配置、worker 与交易 CLI 保持一致，未执行迁移或发送订单。
+- 回退标签：`hl-app-web:before-research-csp-78d7986`、`hl-app-gateway:before-research-csp-78d7986`。
+- 详细无凭据元数据：`.runtime/deployments/research-csp-20261117-before.json` 与 `research-csp-20261117-deployed.json`。
+
+公网真实账号的登录会话没有代用；本次区分线上资源/服务核验与针对已报告策略的浏览器模拟，不把后者称为生产账号实测。修复提交未推送远端。
