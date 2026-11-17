@@ -3,9 +3,18 @@ WEB_TEST_IMAGE ?= hl-app-web:local
 E2E_IMAGE ?= hl-app-e2e-test:local
 RUST_RUN = docker run --rm -e CARGO_HOME=/work/.runtime/cargo -v hl-trader-rustup:/usr/local/rustup -v $(CURDIR):/work -w /work $(RUST_IMAGE)
 
-.PHONY: test-fast test-rust test-backend test-frontend test-db test-e2e test-image verify
+.PHONY: test-fast test-rust test-backend test-frontend test-db test-e2e test-image verify test-release-tools research-plan research-verify
 
-test-fast: test-rust test-backend test-frontend
+test-fast: test-rust test-backend test-frontend test-release-tools
+
+test-release-tools:
+	python3 -m unittest discover -s deploy/tests -v
+
+research-plan:
+	python3 deploy/research_release.py plan
+
+research-verify:
+	python3 deploy/research_release.py verify
 
 test-image:
 	docker image inspect $(WEB_TEST_IMAGE) >/dev/null 2>&1 || docker build --target web -t $(WEB_TEST_IMAGE) .

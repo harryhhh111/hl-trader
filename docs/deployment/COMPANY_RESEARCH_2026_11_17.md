@@ -84,3 +84,7 @@ docker compose --env-file .runtime/docker.env \
 本次仅更新 gateway：镜像 `sha256:b349fd1bb103f058906b4b29747ca8f45af16ab1e8f76e9a9d7b3ccc98256e4f`，实际资源 `/assets/index-FjNj_xE1.js`。部署后经 gateway 健康检查为 ok，新公司列表资源已生效，匿名研究请求仍为 401；Web、worker 容器和镜像均保持原样，原研究快照不变。公网真实账号浏览器未代行，不将上述模拟与资源检查称为该项实测。
 
 本地部署记录为 `.runtime/deployments/research-company-entry-20261117-before.json` 与 `research-company-entry-20261117-deployed.json`，回退标签 `hl-app-gateway:before-research-company-entry-6e88553`。未执行数据库迁移或交易，未推送远端。
+
+## 后续工具整理
+
+重复核验和发布步骤已整理为仓库正式工具，使用方式见 [研究页面核验与发布流程](RESEARCH_RELEASE_WORKFLOW.md)。原部署记录和回退镜像继续保留；此次整理只执行工具测试与只读核验，不重新部署服务。任务结束时的一次性文件清理清单记录在 `.runtime/maintenance/`。
