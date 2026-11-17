@@ -64,3 +64,13 @@ docker compose --env-file .runtime/docker.env \
 - 详细无凭据元数据：`.runtime/deployments/research-csp-20261117-before.json` 与 `research-csp-20261117-deployed.json`。
 
 公网真实账号的登录会话没有代用；本次区分线上资源/服务核验与针对已报告策略的浏览器模拟，不把后者称为生产账号实测。修复提交未推送远端。
+
+## 新页面阅读与侧栏简化（2026-11-17 16:49 UTC）
+
+按用户要求移除“外部来源”模块，正文旁新增“新页面阅读”按钮。新标签页直接加载带鉴权的原快照 HTML，使用浏览器整页滚动，不含 iframe；默认内嵌预览保留。代码提交 `ec03c66`。
+
+本轮仅构建并更新 gateway，Web 与 worker 的容器 ID 和镜像均保持不变，原报告快照与鉴权沿用。新 gateway 镜像为 `sha256:29af23283447c72cc159606684046ab2d0c661722df6841d4c3d2be99e9f6d37`，实际前端资源 `/assets/index-By1q0K_7.js`；部署后检查健康为 ok，新按钮文案存在，已删除的两项资料模块文案不在前端资源中，匿名研究请求仍为 401。
+
+前端单元测试、类型检查及构建通过，浏览器 66 项通过、2 项跳过。新增桌面/手机用例在 `frame-ancestors 'none'` 和 `X-Frame-Options: DENY` 下真实打开独立标签页，验证正文、样式、图片、无 opener、关闭原页后刷新、原生折叠及匿名 401。线上真实账号浏览器未代行，不把模拟与资源核验称为生产账号操作。
+
+本地元数据为 `.runtime/deployments/research-newpage-20261117-before.json` 与 `research-newpage-20261117-deployed.json`；回退 gateway 标签为 `hl-app-gateway:before-research-newpage-ec03c66`。未执行数据库迁移或交易，未推送远端。
