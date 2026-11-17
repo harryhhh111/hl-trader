@@ -94,3 +94,41 @@ test("公网入口禁止 HTTP 页面被嵌入时，正文仍通过鉴权 JSON �
   await expect(page).toHaveURL(/\/research\/reports\/orcl-topic\?snapshot=.*#contracts$/);
   await expect(page.frameLocator('iframe').locator('#contracts')).toBeVisible();
 });
+
+test("新页面阅读直接展示完整报告，禁止嵌入策略不影响独立页面", async ({ page, context }) => {
+  // Reproduce the public framing restriction on the actual HTML response.
+  await context.route('**/api/v1/research/content/**', async route => {
+    const response = await route.fetch();
+    const policy = response.headers()['content-security-policy'];
+    await route.fulfill({ response, headers: {
+      ...response.headers(),
+      'content-security-policy': policy.replace("frame-ancestors 'self'", "frame-ancestors 'none'"),
+      'x-frame-options': 'DENY',
+    } });
+  });
+  await openReport(page);
+  await expect(page.getByRole('heading', { name: '外部来源', exact: true })).toHaveCount(0);
+  const opened = context.waitForEvent('page');
+  await page.getByRole('link', { name: '新页面阅读', exact: true }).click();
+  const reader = await opened;
+  await expect(reader).toHaveURL(/\/api\/v1\/research\/content\/s[a-f0-9]+\/ORCL\/reports\/main\.html$/);
+  await expect(reader.getByRole('heading', { name: '甲骨文：OCI 与 RPO', exact: true })).toBeVisible();
+  await expect(reader.locator('iframe')).toHaveCount(0);
+  await expect(reader.getByText('52,961', { exact: true })).toBeVisible();
+  await expect.poll(() => reader.getByAltText('收入趋势图').evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  await expect(reader.locator('#style-proof')).toHaveCSS('color', 'rgb(1, 2, 3)');
+  expect(await reader.evaluate(() => window.opener === null)).toBe(true);
+  await page.close();
+  const response = await reader.reload();
+  expect(response.status()).toBe(200);
+  expect(response.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
+  await expect(reader.getByText('57,419', { exact: true })).toBeVisible();
+  await reader.getByText('展开查看口径', { exact: true }).click();
+  await expect(reader.getByText('口径为美元百万。', { exact: true })).toBeVisible();
+  const anonymous = await context.browser().newContext();
+  try {
+    expect((await anonymous.request.get(reader.url())).status()).toBe(401);
+  } finally {
+    await anonymous.close();
+  }
+});

@@ -9,7 +9,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ReportBadges } from "@/pages/research-page";
 import {
   formatResearchDate,
-  safeExternalUrl,
   absoluteReaderLinks,
   type ResearchReportSummary,
 } from "@/lib/types/research";
@@ -145,37 +144,16 @@ export function ResearchReportPage() {
               </Card>
             )}
 
-            {data.external_links.length > 0 && (
-              <Card>
-                <CardContent className="py-4 space-y-2">
-                  <h3 className="text-sm font-semibold">外部来源</h3>
-                  <p className="text-xs text-muted-foreground">外部来源由外层受控入口打开，不在报告内嵌页面内跳转。</p>
-                  <ul className="space-y-1 text-xs">
-                    {data.external_links.map((item) => {
-                      const url = safeExternalUrl(item.url);
-                      return (
-                        <li key={item.url}>
-                          {url ? (
-                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                              {item.label || url}
-                              <ExternalLink className="inline w-3 h-3 ml-1" />
-                            </a>
-                          ) : (
-                            <span className="text-muted-foreground">{item.label || item.url}</span>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold">报告正文</h2>
-              <span className="text-xs text-muted-foreground">静态阅读模式：不执行报告脚本，不加载外部资源</span>
+              <Button asChild variant="outline" size="sm">
+                <a href={data.content_url + location.hash} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="mr-2 h-4 w-4" />新页面阅读
+                </a>
+              </Button>
             </div>
             <ReportDocument html={data.document_html} title={data.report.title} fragment={location.hash} />
           </div>

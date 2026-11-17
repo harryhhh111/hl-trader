@@ -47,7 +47,7 @@ test("公司研究列表按公司分组展示报告并支持搜索", async ({ pa
   await page.screenshot({ path: `${evidence}/${testInfo.project.name}-research.png`, fullPage: true });
 });
 
-test("阅读页展示报告信息、同公司切换与受控外部来源", async ({ page }) => {
+test("阅读页展示报告信息、同公司切换和新页面阅读入口", async ({ page }) => {
   await login(page);
   await page.goto("/research?q=%E7%94%B2%E9%AA%A8%E6%96%87");
   await page.getByRole("link", { name: "甲骨文：OCI 与 RPO", exact: true }).click();
@@ -60,9 +60,8 @@ test("阅读页展示报告信息、同公司切换与受控外部来源", async
   await expect(page.getByRole("link", { name: "甲骨文：云合同结构", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "未发布资料", exact: true })).toHaveCount(0);
   await expect(page.getByText("网站附件发布范围尚未审核", { exact: false })).toHaveCount(0);
-  const source = page.getByRole("link", { name: "甲骨文投资者关系", exact: false });
-  await expect(source).toHaveAttribute("href", "https://example.com/oracle-source");
-  await expect(source).toHaveAttribute("rel", /noopener/);
+  await expect(page.getByRole("heading", { name: "外部来源", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "新页面阅读", exact: true })).toHaveAttribute("target", "_blank");
 
   // 同公司切换
   await page.getByRole("link", { name: "甲骨文：云合同结构", exact: true }).click();

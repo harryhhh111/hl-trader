@@ -179,8 +179,11 @@ test("阅读页展示报告信息和阅读准备状态，不展示未发布资�
   assert.match(markup, /微软：传统软件与现金流/);
   assert.doesNotMatch(markup, /未发布资料/);
   assert.doesNotMatch(markup, /发布范围尚未审核/);
-  assert.match(markup, /外部来源/);
-  assert.match(markup, /href="https:\/\/www.microsoft.com\/investor"/);
+  assert.doesNotMatch(markup, /外部来源/);
+  assert.doesNotMatch(markup, /href="https:\/\/www.microsoft.com\/investor"/);
+  assert.match(markup, /新页面阅读/);
+  assert.match(markup, /href="\/api\/v1\/research\/content\/s11111111111111111111111111111111\/MSFT\/MSFT.html"/);
+  assert.match(markup, /target="_blank" rel="noopener noreferrer"/);
   assert.match(markup, /正在准备报告正文/);
   assert.match(markup, /返回公司研究/);
 });
