@@ -103,6 +103,10 @@ docker compose --env-file .runtime/docker.env -f compose.yaml -f compose.managed
 
 非 Docker worker 默认 `HL_APP_COLLECTORS_ENABLED=false`、`HL_APP_SCHEDULER_ENABLED=false`、`HL_APP_RISK_MONITOR_ENABLED=false`、`HL_APP_REBALANCE_MONITOR_ENABLED=false`。真实出口、来源可达性和维护窗口确认后才可启用：
 
+仅启用行情时设置 `HL_APP_QUOTES_ENABLED=true`，可保持 `HL_APP_COLLECTORS_ENABLED=false`，公告采集与 stock_data 同步不会因此启用。行情开关留空时沿用总采集开关；显式 `false` 可独立暂停行情。调度器仍需 `HL_APP_SCHEDULER_ENABLED=true`，采集间隔由 `HL_APP_COLLECTION_INTERVAL_SECONDS` 控制。Docker worker 可通过 `HL_APP_WORKER_IMAGE` 固定独立镜像，避免更新其他服务。
+
+2026-11-18 已完成独立行情开关启用与首轮真实回补，见[关注股行情启用记录](WATCHLIST_QUOTES_2026_11_18.md)。
+
 ```sh
 .venv/bin/python -m hl_app.workers --once --kind quotes
 .venv/bin/python -m hl_app.workers --once --kind announcements

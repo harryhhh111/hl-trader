@@ -83,6 +83,7 @@ services:
 
   worker:
     <<: *web-image
+    image: ${HL_APP_WORKER_IMAGE:-hl-app-web:local}
     command: ["python", "-m", "hl_app.workers", "--run"]
     restart: unless-stopped
     init: true
@@ -95,6 +96,7 @@ services:
       HL_APP_TRADER_BIN: /usr/local/bin/hl-trader
       HL_APP_PAIRS_CONFIG: /etc/hl-app/pairs.json
       HL_APP_COLLECTORS_ENABLED: ${HL_APP_COLLECTORS_ENABLED:-false}
+      HL_APP_QUOTES_ENABLED: ${HL_APP_QUOTES_ENABLED:-}
       HL_APP_SCHEDULER_ENABLED: "true"
       HL_APP_ENHANCEMENT_ENABLED: ${HL_APP_ENHANCEMENT_ENABLED:-false}
       HL_APP_COLLECTION_INTERVAL_SECONDS: ${HL_APP_COLLECTION_INTERVAL_SECONDS:-3600}

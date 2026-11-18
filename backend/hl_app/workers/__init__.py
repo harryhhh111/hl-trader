@@ -76,9 +76,19 @@ def _enhancement_enabled() -> bool:
     return value == "true"
 
 
+def _quotes_enabled() -> bool:
+    value = os.environ.get("HL_APP_QUOTES_ENABLED", "").strip().lower()
+    if not value:
+        value = os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").strip().lower()
+    if value not in {"true", "false"}:
+        raise ConfigError("HL_APP_QUOTES_ENABLED 必须是 true 或 false；留空时沿用总采集开关")
+    return value == "true"
+
+
 def dry_run(url: str) -> dict:
     return {
         "collectors_enabled": os.environ.get("HL_APP_COLLECTORS_ENABLED", "false") == "true",
+        "quotes_enabled": _quotes_enabled(),
         "scheduler_enabled": os.environ.get("HL_APP_SCHEDULER_ENABLED", "false") == "true",
         "risk_monitor_enabled": os.environ.get("HL_APP_RISK_MONITOR_ENABLED", "false") == "true",
         "rebalance_monitor_enabled": os.environ.get("HL_APP_REBALANCE_MONITOR_ENABLED", "false") == "true",
@@ -101,6 +111,8 @@ def _monitor_env(kind: str) -> str:
 def run_once(url: str, kind: str, http_get=None) -> dict:
     monitor = kind in {"pair_risk", "pair_rebalance"}
     enabled = os.environ.get(_monitor_env(kind) if monitor else "HL_APP_COLLECTORS_ENABLED", "false").lower() == "true"
+    if kind == "quotes":
+        enabled = _quotes_enabled()
     if kind == "news_sync":
         enabled = enabled and os.environ.get("HL_APP_NEWS_SYNC_ENABLED", "false").lower() == "true"
     if not enabled:
@@ -133,7 +145,7 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
         lifecycle.ensure_healthy()
         assert_active(url)
         return news_sync.run(url)
-    if os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() != "true":
+    if not (_quotes_enabled() if kind == "quotes" else os.environ.get("HL_APP_COLLECTORS_ENABLED", "false").lower() == "true"):
         return {"status": "disabled", "kind": kind}
     lifecycle.ensure_healthy()
     assert_active(url)
