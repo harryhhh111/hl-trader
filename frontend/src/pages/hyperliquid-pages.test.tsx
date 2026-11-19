@@ -395,8 +395,8 @@ test('调仓使用说明子页面包含操作步骤、差额示例和异常处�
   assert.match(html, /1995 USD/);
   assert.match(html, /15000 USD/);
   assert.match(html, /API Wallet/);
-  assert.match(html, /本地签名/);
-  assert.match(html, /不写入 localStorage/);
+  assert.match(html, /确认托管钱包/);
+  assert.match(html, /调仓弹框不要求输入私钥/);
   assert.match(html, /禁止输入原交易账户私钥/);
   assert.match(html, /调仓结果未知/);
   assert.match(html, /禁止直接重试/);

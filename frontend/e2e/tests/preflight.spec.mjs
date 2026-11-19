@@ -27,11 +27,11 @@ async function setup(page, settings) {
   await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustment-quote?*', (route) => json(route, {
     queried_at: new Date().toISOString(), legs: ['xyz:NBIS', 'xyz:CRWV'].map((coin) => ({ coin, mid: '100', bid: '99.99', ask: '100.01', book_time: new Date().toISOString() })),
   }));
-  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/preview', (route) => {
+  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-preview', (route) => {
     const body = route.request().postDataJSON();
     const reducing = body.target_notional === '0';
     return json(route, {
-      schema_version: 1, status: 'preview', target_notional: body.target_notional, diagnostics: [],
+      schema_version: 1, status: 'preview', managed_status: 'previewed', request_id: body.request_id, wallet_version: 1, target_notional: body.target_notional, diagnostics: [],
       legs: ['xyz:NBIS', 'xyz:CRWV'].map((coin, index) => ({
         coin, position_side: index ? 'short' : 'long', current_notional: '1000',
         estimated_target_notional: body.target_notional, action: index ? 'sell' : 'buy',
@@ -47,8 +47,7 @@ async function setup(page, settings) {
   await page.getByRole('button', { name: '调整仓位', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '调整两腿仓位', exact: true });
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
-  await dialog.getByLabel('API Wallet 私钥').fill(`0x${'0'.repeat(63)}1`);
-  await dialog.getByRole('button', { name: '加载 API Wallet', exact: true }).click();
+  await dialog.getByLabel('确认目标金额', { exact: true }).fill('2000');
   return dialog;
 }
 
@@ -65,7 +64,7 @@ test('超限和逐仓阻止增仓，手动修改遵守 3x 上限并清除旧预�
   });
   const dialog = await setup(page, settings);
   await expect(dialog.getByText('当前设置').first()).toContainText('4x');
-  await expect(dialog.getByRole('button', { name: '本地签名并下单', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: '使用托管钱包下单', exact: true })).toBeDisabled();
   await dialog.getByRole('button', { name: '调整 xyz:NBIS 杠杆', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '调整 xyz:NBIS 杠杆', exact: true });
   await expect(editor.getByLabel('保证金模式')).toHaveValue('cross');
@@ -80,19 +79,20 @@ test('超限和逐仓阻止增仓，手动修改遵守 3x 上限并清除旧预�
   // Updated settings can unmount the completed editor when its current-value props refresh.
   if (await editor.count()) await editor.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
-  await expect(dialog.getByRole('button', { name: '本地签名并下单', exact: true })).toBeEnabled();
+  await dialog.getByLabel('确认目标金额', { exact: true }).fill('2000');
+  await expect(dialog.getByRole('button', { name: '使用托管钱包下单', exact: true })).toBeEnabled();
   expect(changes).toBe(1);
 });
 
 test('点击下单时重新检查，变化后的超限状态不会进入签名准备', async ({ page }) => {
   const settings = { leverage: 3, mode: 'cross' };
   let prepares = 0;
-  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/browser-prepare', (route) => {
+  await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-execute', (route) => {
     prepares += 1;
     return route.abort();
   });
   const dialog = await setup(page, settings);
-  const execute = dialog.getByRole('button', { name: '本地签名并下单', exact: true });
+  const execute = dialog.getByRole('button', { name: '使用托管钱包下单', exact: true });
   await expect(execute).toBeEnabled();
   settings.leverage = 4;
   await execute.click();
@@ -104,7 +104,7 @@ test('点击下单时重新检查，变化后的超限状态不会进入签名�
 test('检查失败禁止增仓，但纯减仓预览仍可执行；仅逐仓市场允许例外', async ({ page }) => {
   const settings = { leverage: 3, mode: 'isolated', onlyIsolated: true };
   const dialog = await setup(page, settings);
-  const execute = dialog.getByRole('button', { name: '本地签名并下单', exact: true });
+  const execute = dialog.getByRole('button', { name: '使用托管钱包下单', exact: true });
   await expect(execute).toBeEnabled();
   settings.failed = true;
   await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
@@ -112,6 +112,7 @@ test('检查失败禁止增仓，但纯减仓预览仍可执行；仅逐仓市�
   await expect(execute).toBeDisabled();
   await dialog.getByLabel('每腿目标名义').fill('0');
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
+  await dialog.getByLabel('确认目标金额', { exact: true }).fill('0');
   await expect(execute).toBeEnabled();
 });
 

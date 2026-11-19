@@ -1,6 +1,8 @@
+import { mockManagedWallet } from "../managed-adjustment-fixture.mjs";
 import { test, expect } from "@playwright/test";
 
 async function setup(page) {
+  await mockManagedWallet(page);
   let ask = "100.01";
   const requests = [];
   const reply = (route, data) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data }) });
@@ -9,14 +11,14 @@ async function setup(page) {
     legs: [{ coin: "xyz:NBIS", ask, bid: String(Number(ask) - 0.02), mid: String(Number(ask) - 0.01), book_time: new Date().toISOString() },
       { coin: "xyz:CRWV", ask: "50.001", bid: "49.999", mid: "50", book_time: new Date().toISOString() }],
   }));
-  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/preview", route => {
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-preview", route => {
     const body = route.request().postDataJSON();
     requests.push(body);
     const bps = body.max_slippage_bps;
     return reply(route, {
       schema_version: 1, status: "preview", action_id: null, pair_id: "nbis-crwv", network: "mainnet",
       config_revision: body.config_revision, account_address: body.account_address, target_notional: body.target_notional,
-      max_slippage_bps: bps, diagnostics: [],
+      max_slippage_bps: bps, request_id: body.request_id, wallet_version: body.wallet_version, managed_status: "previewed", diagnostics: [],
       legs: ["xyz:NBIS", "xyz:CRWV"].map((coin, i) => ({
         coin, position_side: i === 0 ? "long" : "short", action: i === 0 ? "buy" : "sell", reduce_only: false,
         current_size: "0", current_notional: "0", mid_px: i === 0 ? "100" : "50", target_size: i === 0 ? "20" : "40",
