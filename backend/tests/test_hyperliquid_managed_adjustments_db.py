@@ -70,6 +70,7 @@ def report(revision: str, request_id: str, status="succeeded") -> dict:
         "config_revision": revision,
         "account_address": ADDRESS_LOWER,
         "target_notional": "2000",
+        "max_slippage_bps": 5,
         "created_at": "2026-11-04T00:00:00Z",
         "legs": [{"coin": "xyz:NBIS"}, {"coin": "xyz:CRWV"}],
         "diagnostics": [],
@@ -93,7 +94,7 @@ def execute(ready, request_id: str) -> dict:
 
 def test_managed_preview_execute_and_duplicate_return_original(ready, monkeypatch) -> None:
     request_id = str(uuid.uuid4())
-    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args: report(pairs.load_pairs()[0], request_id, "preview"))
+    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
     previewed = preview(ready, request_id)
     assert previewed["managed_status"] == "previewed"
     calls = []
@@ -106,16 +107,30 @@ def test_managed_preview_execute_and_duplicate_return_original(ready, monkeypatc
     executed = execute(ready, request_id)
     assert executed["managed_status"] == "succeeded" and executed["action_id"] == ACTION_ID
     assert execute(ready, request_id) == executed
+
     assert len(calls) == 1 and calls[0][1] is True and len(calls[0][2]) == 1
     assert PRIVATE_KEY not in " ".join(calls[0][0])
     assert managed.get_managed_execution(ready.runtime_url, "nbis-crwv", request_id) == executed
 
 
+
+def test_request_id_cannot_change_slippage_after_preview(ready, monkeypatch):
+    request_id = str(uuid.uuid4())
+    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
+    preview(ready, request_id)
+    monkeypatch.setattr(managed.adjustments, "_invoke", lambda *_args, **_kwargs: pytest.fail("must not execute"))
+    with pytest.raises(wallets.WalletError, match="其他调仓请求"):
+        managed.execute_managed(ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0],
+            "2000", "2000", request_id, 1, session(), max_slippage_bps=10)
+    with pytest.raises(wallets.WalletError, match="其他调仓请求"):
+        managed.preview_managed(ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0],
+            "2000", request_id, 1, session(), max_slippage_bps=10)
+
 def test_managed_request_id_cannot_change_leg_scope(ready, monkeypatch) -> None:
     request_id = str(uuid.uuid4())
     monkeypatch.setattr(
         managed.adjustments, "preview",
-        lambda *args: {**report(pairs.load_pairs()[0], request_id, "preview"), "leg_indices": args[-1]},
+        lambda *args, **_kwargs: {**report(pairs.load_pairs()[0], request_id, "preview"), "leg_indices": args[-1]},
     )
     previewed = managed.preview_managed(
         ready.runtime_url, "nbis-crwv", ADDRESS_LOWER, pairs.load_pairs()[0],
@@ -128,7 +143,7 @@ def test_managed_request_id_cannot_change_leg_scope(ready, monkeypatch) -> None:
 
 def test_unknown_blocks_new_execution_and_wallet_mutation(ready, monkeypatch) -> None:
     request_id = str(uuid.uuid4())
-    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args: report(pairs.load_pairs()[0], request_id, "preview"))
+    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
     preview(ready, request_id)
     monkeypatch.setattr(
         managed.adjustments, "_invoke",

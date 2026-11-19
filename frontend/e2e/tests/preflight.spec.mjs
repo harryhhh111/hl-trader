@@ -25,7 +25,7 @@ async function setup(page, settings) {
     wallet_address: wallet, wallet_version: 1, active_execution: null,
   }));
   await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustment-quote?*', (route) => json(route, {
-    queried_at: new Date().toISOString(), legs: ['xyz:NBIS', 'xyz:CRWV'].map((coin) => ({ coin, mid: '100', bid: '99', ask: '101', book_time: new Date().toISOString() })),
+    queried_at: new Date().toISOString(), legs: ['xyz:NBIS', 'xyz:CRWV'].map((coin) => ({ coin, mid: '100', bid: '99.99', ask: '100.01', book_time: new Date().toISOString() })),
   }));
   await page.route('**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/preview', (route) => {
     const body = route.request().postDataJSON();
@@ -35,7 +35,7 @@ async function setup(page, settings) {
       legs: ['xyz:NBIS', 'xyz:CRWV'].map((coin, index) => ({
         coin, position_side: index ? 'short' : 'long', current_notional: '1000',
         estimated_target_notional: body.target_notional, action: index ? 'sell' : 'buy',
-        reduce_only: reducing, order_qty: '1', mid_px: '100', protect_px: '100', status: 'preview',
+        reduce_only: reducing, order_qty: '1', mid_px: '100', protect_px: index ? '99.95' : '100.05', status: 'preview',
       })),
     });
   });

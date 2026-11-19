@@ -202,6 +202,22 @@ pub struct BboView {
     pub time_ms: u64,
 }
 
+pub struct OrderBookView {
+    pub bids: Vec<hypersdk::hypercore::types::BookLevel>,
+    pub asks: Vec<hypersdk::hypercore::types::BookLevel>,
+    pub time_ms: u64,
+}
+
+impl OrderBookView {
+    pub fn bbo(&self) -> BboView {
+        BboView {
+            bid: self.bids.first().map(|l| l.px),
+            ask: self.asks.first().map(|l| l.px),
+            time_ms: self.time_ms,
+        }
+    }
+}
+
 /// 单个永续市场的当前资金费与标记/预言机价格（metaAndAssetCtxs）。
 pub struct AssetCtxView {
     /// 当前小时资金费率（小数，如 0.0001 = 0.01%）。
@@ -569,14 +585,22 @@ impl Adapter {
 
     /// 盘口第一层买/卖价。pair 的 IOC 保护价以此计算（PHASE2_PLAN §2）。
     pub async fn bbo(&self, coin: &str) -> Result<BboView, AdapterError> {
+        Ok(self.order_book(coin).await?.bbo())
+    }
+
+    pub async fn order_book(&self, coin: &str) -> Result<OrderBookView, AdapterError> {
         let book = self
             .client
             .l2_book(coin.to_string(), None, None)
             .await
             .map_err(classify_info_error)?;
-        Ok(BboView {
-            bid: book.best_bid().map(|l| l.px),
-            ask: book.best_ask().map(|l| l.px),
+        if book.coin != coin {
+            return Err(AdapterError::BadResponse("盘口合约身份不一致".into()));
+        }
+        let [bids, asks] = book.levels;
+        Ok(OrderBookView {
+            bids,
+            asks,
             time_ms: book.time,
         })
     }

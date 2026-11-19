@@ -394,6 +394,7 @@ export interface HlAdjustmentLeg {
   action: 'buy' | 'sell' | 'none';
   order_qty: string;
   protect_px: string;
+  depth?: { book_time_ms: number; available_qty: string; required_qty: string; estimated_avg_px: string; worst_fill_px: string };
   reduce_only: boolean;
   asset: number;
   nonce: number | null;
@@ -424,6 +425,7 @@ export interface HlAdjustmentReport {
   config_revision: string;
   account_address: string;
   target_notional: string;
+  max_slippage_bps?: number;
   leg_indices?: number[];
   created_at: string;
   legs: HlAdjustmentLeg[];

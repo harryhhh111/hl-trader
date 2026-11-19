@@ -6,6 +6,7 @@
 mod adjust;
 mod config;
 mod dashboard;
+mod execution_price;
 mod hyperliquid;
 mod intel;
 mod leverage;
@@ -146,6 +147,8 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        #[arg(long, default_value_t = execution_price::DEFAULT_SLIPPAGE_BPS, value_parser = clap::value_parser!(u32).range(1..=50))]
+        max_slippage_bps: u32,
         /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
         #[arg(long = "leg-index")]
         leg_indices: Vec<usize>,
@@ -183,6 +186,8 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        #[arg(long, default_value_t = execution_price::DEFAULT_SLIPPAGE_BPS, value_parser = clap::value_parser!(u32).range(1..=50))]
+        max_slippage_bps: u32,
         /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
         #[arg(long = "leg-index")]
         leg_indices: Vec<usize>,
@@ -203,6 +208,8 @@ enum Commands {
         notional: String,
         #[arg(long)]
         max_notional: String,
+        #[arg(long, default_value_t = execution_price::DEFAULT_SLIPPAGE_BPS, value_parser = clap::value_parser!(u32).range(1..=50))]
+        max_slippage_bps: u32,
         /// 仅调整指定腿（0 或 1）；可重复，默认两腿。
         #[arg(long = "leg-index")]
         leg_indices: Vec<usize>,
@@ -406,6 +413,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            max_slippage_bps,
             leg_indices,
             secret_file,
             secret_fd,
@@ -421,6 +429,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    max_slippage_bps,
                     leg_indices,
                     secret_file,
                     secret_fd,
@@ -437,6 +446,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            max_slippage_bps,
             leg_indices,
             state_dir,
             signer,
@@ -449,6 +459,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    max_slippage_bps,
                     leg_indices,
                     state_dir,
                     signer,
@@ -461,6 +472,7 @@ async fn main() -> ExitCode {
             address,
             notional,
             max_notional,
+            max_slippage_bps,
             leg_indices,
             state_dir,
             signer,
@@ -475,6 +487,7 @@ async fn main() -> ExitCode {
                     address,
                     notional,
                     max_notional,
+                    max_slippage_bps,
                     leg_indices,
                     state_dir,
                     signer,
@@ -1240,6 +1253,7 @@ struct AdjustCommand {
     address: String,
     notional: String,
     max_notional: String,
+    max_slippage_bps: u32,
     leg_indices: Vec<usize>,
     secret_file: Option<PathBuf>,
     secret_fd: Option<std::os::fd::RawFd>,
@@ -1353,6 +1367,7 @@ async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> Ex
         address,
         notional,
         max_notional,
+        max_slippage_bps,
         leg_indices,
         secret_file,
         secret_fd,
@@ -1426,6 +1441,7 @@ async fn cmd_adjust(config_path: &std::path::Path, command: AdjustCommand) -> Ex
         account,
         target_notional: target,
         max_notional: maximum,
+        max_slippage_bps,
         leg_indices,
         state_dir: state_dir
             .as_deref()
@@ -1459,6 +1475,7 @@ struct BrowserCommand {
     address: String,
     notional: String,
     max_notional: String,
+    max_slippage_bps: u32,
     leg_indices: Vec<usize>,
     state_dir: PathBuf,
     signer: String,
@@ -1471,6 +1488,7 @@ struct BrowserContext {
     account: Address,
     target: Decimal,
     maximum: Decimal,
+    max_slippage_bps: u32,
     leg_indices: [bool; 2],
     state_dir: PathBuf,
     signer: Address,
@@ -1485,6 +1503,7 @@ impl BrowserContext {
             account: self.account,
             target_notional: self.target,
             max_notional: self.maximum,
+            max_slippage_bps: self.max_slippage_bps,
             leg_indices: self.leg_indices,
             state_dir: &self.state_dir,
             request_id: None,
@@ -1535,6 +1554,7 @@ fn load_browser_context(
         account,
         target,
         maximum,
+        max_slippage_bps: command.max_slippage_bps,
         leg_indices,
         state_dir: command.state_dir,
         signer,

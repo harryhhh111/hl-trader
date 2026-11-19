@@ -32,7 +32,7 @@ def _request_id(value: str) -> str:
 
 def _payload_hash(
     descriptor: dict, account: str, target: Decimal, config_revision: str, wallet_version: int,
-    leg_indices: list[int],
+    leg_indices: list[int], max_slippage_bps: int = 5,
 ) -> str:
     body = {
         "network": descriptor["network"],
@@ -42,6 +42,7 @@ def _payload_hash(
         "config_revision": config_revision,
         "wallet_version": wallet_version,
         "leg_indices": leg_indices,
+        "max_slippage_bps": adjustments._slippage(max_slippage_bps),
     }
     encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -104,14 +105,16 @@ def preview_managed(
     wallet_version: int,
     session: SessionInfo,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
+    max_slippage_bps = adjustments._slippage(max_slippage_bps)
     request_id = _request_id(request_id)
     if type(wallet_version) is not int or wallet_version < 1:
         raise wallets.WalletError(422, "托管钱包版本非法")
     target = adjustments._decimal(target_notional, "每腿目标名义")
     selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
-    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected)
+    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected, max_slippage_bps)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             existing = _matching_existing(
@@ -123,10 +126,10 @@ def preview_managed(
             if wallets._active_execution(cursor, descriptor["network"], pair_id, account):
                 raise wallets.WalletError(409, "存在执行中或待核对的调仓，请完成核对后再预览")
     if selected == [0, 1]:
-        report = adjustments.preview(url, pair_id, account, config_revision, target_notional, session.account_id)
+        report = adjustments.preview(url, pair_id, account, config_revision, target_notional, session.account_id, max_slippage_bps=max_slippage_bps)
     else:
         report = adjustments.preview(
-            url, pair_id, account, config_revision, target_notional, session.account_id, selected,
+            url, pair_id, account, config_revision, target_notional, session.account_id, selected, max_slippage_bps=max_slippage_bps,
         )
     preview_hash = _preview_hash(report)
     report.update({
@@ -221,14 +224,16 @@ def execute_managed(
     wallet_version: int,
     session: SessionInfo,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> tuple[dict, int]:
+    max_slippage_bps = adjustments._slippage(max_slippage_bps)
     request_id = _request_id(request_id)
     target = adjustments._decimal(target_notional, "每腿目标名义")
     if confirmation.strip() != adjustments._decimal_arg(target):
         raise wallets.WalletError(422, "确认金额必须与每腿目标名义完全一致")
     selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
-    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected)
+    payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected, max_slippage_bps)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             wallets._lock_scope(cursor, descriptor["network"], pair_id, account)
@@ -264,7 +269,7 @@ def execute_managed(
             wallet["encrypted_private_key"], descriptor["network"], pair_id, account,
             wallet["wallet_address"], wallet_version,
         )
-        argv = adjustments._base_argv(descriptor, account, target, "adjust", selected)
+        argv = adjustments._base_argv(descriptor, account, target, "adjust", selected, max_slippage_bps)
         argv.extend([
             "--secret-fd", "0", "--state-dir", adjustments._state_dir(),
             "--request-id", request_id, "--execute",

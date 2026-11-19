@@ -42,6 +42,7 @@ class AdjustmentPreview(BaseModel):
     target_notional: str = Field(min_length=1, max_length=40)
     account_address: str = Field(min_length=42, max_length=42)
     config_revision: str = Field(min_length=64, max_length=64)
+    max_slippage_bps: int = Field(default=5, ge=1, le=50, strict=True)
     leg_indices: list[int] | None = Field(default=None, max_length=2)
 
     model_config = {"extra": "forbid"}
@@ -490,7 +491,7 @@ def preview_pair_adjustment(pair_id: str, body: AdjustmentPreview, request: Requ
             body.account_address,
             body.config_revision,
             body.target_notional,
-            _owner(request), body.leg_indices,
+            _owner(request), body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -508,7 +509,7 @@ def preview_managed_adjustment(pair_id: str, body: ManagedAdjustmentPreview, req
         return {"data": managed_adjustments_service.preview_managed(
             request.app.state.settings.database_url, pair_id, body.account_address,
             body.config_revision, body.target_notional, body.request_id,
-            body.wallet_version, request.state.session, body.leg_indices,
+            body.wallet_version, request.state.session, body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )}
     except adjustments_service.AdjustmentError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -522,7 +523,7 @@ def execute_managed_adjustment(pair_id: str, body: ManagedAdjustmentExecute, req
         result, status = managed_adjustments_service.execute_managed(
             request.app.state.settings.database_url, pair_id, body.account_address,
             body.config_revision, body.target_notional, body.confirmation,
-            body.request_id, body.wallet_version, request.state.session, body.leg_indices,
+            body.request_id, body.wallet_version, request.state.session, body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )
         _record_risk_result(request, pair_id, body.account_address, result)
         _record_rebalance_result(request, pair_id, body.account_address, result)
@@ -556,7 +557,7 @@ def prepare_browser_adjustment(pair_id: str, body: BrowserAdjustmentPrepare, req
             body.config_revision,
             body.target_notional,
             body.expected_signer,
-            _owner(request), body.leg_indices,
+            _owner(request), body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )
         return {"data": report}
     except adjustments_service.AdjustmentError as exc:
@@ -580,7 +581,7 @@ def submit_browser_adjustment(pair_id: str, body: BrowserAdjustmentSubmit, reque
             body.expected_signer,
             body.action_id,
             [item.model_dump() for item in body.signatures],
-            _owner(request), body.leg_indices,
+            _owner(request), body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )
         _record_risk_result(request, pair_id, body.account_address, report)
         _record_rebalance_result(request, pair_id, body.account_address, report)
@@ -604,7 +605,7 @@ def execute_pair_adjustment(pair_id: str, body: AdjustmentExecute, request: Requ
             body.config_revision,
             body.target_notional,
             body.confirmation,
-            _owner(request), body.leg_indices,
+            _owner(request), body.leg_indices, max_slippage_bps=body.max_slippage_bps,
         )
         _record_risk_result(request, pair_id, body.account_address, report)
         _record_rebalance_result(request, pair_id, body.account_address, report)

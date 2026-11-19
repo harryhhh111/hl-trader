@@ -35,6 +35,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState(initialTarget);
+  const [slippageBps, setSlippageBps] = useState(5);
   const [signerMode, setSignerMode] = useState<'managed' | 'local' | 'injected'>('local');
   const [injectedSigner, setInjectedSigner] = useState<string | null>(null);
   const [localWallet, setLocalWallet] = useState<LocalWallet | null>(null);
@@ -57,6 +58,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     : signerMode === 'injected' ? injectedSigner : null;
   const body = {
     target_notional: target.trim(),
+    max_slippage_bps: slippageBps,
     account_address: account ?? '',
     config_revision: configRevision,
     ...(legIndices == null ? {} : { leg_indices: legIndices }),
@@ -252,7 +254,11 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
   const stalePreview = report != null
     && ['preview', 'prepared'].includes(report.status)
     && quoteQuery.data != null
-    && report.legs.some((leg, index) => quoteQuery.data.legs[index]?.mid !== leg.mid_px);
+    && report.legs.some((leg, index) => {
+      const quote = quoteQuery.data.legs[index];
+      return quote != null && Number(leg.order_qty) > 0 && (leg.action === 'buy'
+        ? Number(quote.ask) > Number(leg.protect_px) : Number(quote.bid) < Number(leg.protect_px));
+    });
   const preflight = useQuery({
     ...preflightQueryOptions(descriptor, configRevision),
     enabled: open && account != null && !busy,
@@ -315,6 +321,14 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
           ) : (
             <form className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={requestPreview}>
               <label className="grid w-full gap-1 text-sm sm:w-auto">
+                <span>最大允许滑点</span>
+                <select aria-label="最大允许滑点" className="h-10 rounded-md border bg-background px-3" value={slippageBps} disabled={busy} onChange={(event) => {
+                  setSlippageBps(Number(event.target.value)); setReport(null); setConfirmation(''); preview.reset();
+                }}>
+                  {[2, 5, 10, 20, 50].map((bps) => <option key={bps} value={bps}>{(bps / 100).toFixed(2)}%</option>)}
+                </select>
+              </label>
+              <label className="grid w-full gap-1 text-sm sm:w-auto">
                 <span>每腿目标名义（USD）</span>
                 <input
                   aria-label="每腿目标名义"
@@ -342,6 +356,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
             data={preflight.data} error={preflight.error} loading={preflight.isPending} refreshing={preflight.isFetching}
             busy={busy} onRefresh={() => void preflight.refetch()} onSettingsChanged={settingsChanged} />}
 
+          <p className="text-xs text-muted-foreground">每腿保护价受计划中间价 ±{(slippageBps / 100).toFixed(2)}% 限制，预览和发送前均检查整笔数量的可见盘口深度。托管执行会按最新盘口重算计划；深度检查通过仍可能因行情变化而部分成交。</p>
           <section aria-label="实时盘口" className="rounded-md border p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium">实时盘口（每 5 秒更新）</span>
@@ -375,7 +390,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                 <span className="font-mono text-xs text-muted-foreground">{report.action_id ?? report.request_id ?? 'dry-run'}</span>
               </div>
               {stalePreview && <div className="flex flex-wrap items-center gap-2 rounded-md bg-amber-500/10 p-2 text-sm text-amber-700" role="alert">
-                <span>盘口已变化，当前预览已过期，请重新预览后再执行。</span>
+                <span>盘口已超出保护价，当前预览已过期，请重新预览后再执行。</span>
                 <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => preview.mutate()}>按最新盘口重新预览</Button>
               </div>}
               <div className="overflow-x-auto">
@@ -399,6 +414,14 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                   ))}</tbody>
                 </table>
               </div>
+              <div className="grid gap-2 sm:grid-cols-2" aria-label="盘口深度检查">{report.legs.map((leg) => leg.depth && (
+                <div key={leg.coin} className="rounded bg-muted/40 p-2 text-xs">
+                  <span className="font-medium">{leg.coin} 深度检查通过</span>
+                  <p>需求 {leg.depth.required_qty} / 限价内可见数量 {leg.depth.available_qty}</p>
+                  <p>预计均价 {leg.depth.estimated_avg_px} · 保护价 {leg.protect_px}</p>
+                  <p className="text-muted-foreground">盘口时间 {formatTime(new Date(leg.depth.book_time_ms).toISOString())}</p>
+                </div>
+              ))}</div>
               <ul className="space-y-1 text-xs text-muted-foreground">
                 {report.diagnostics.map((diagnostic, index) => <li key={index}>{diagnostic}</li>)}
               </ul>

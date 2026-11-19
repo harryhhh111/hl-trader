@@ -379,7 +379,7 @@ test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
         config_revision: "test-revision",
         queried_at: "2026-11-10T03:34:27Z",
         legs: [
-          { coin: "xyz:NBIS", bid: "123.28", ask: "123.30", mid, book_time: "2026-11-10T03:34:26Z" },
+          { coin: "xyz:NBIS", bid: String(Number(mid) - 0.01), ask: String(Number(mid) + 0.01), mid, book_time: "2026-11-10T03:34:26Z" },
           { coin: "xyz:CRWV", bid: "44.64", ask: "44.66", mid: "44.65", book_time: "2026-11-10T03:34:26Z" },
         ],
       } }),
@@ -399,7 +399,7 @@ test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
       action_id: null,
       legs: [
         { coin: "xyz:NBIS", position_side: "long", current_size: "0", current_notional: "0", mid_px: mid,
-          target_size: "16", estimated_target_notional: "2000", action: "buy", order_qty: "16", protect_px: "123.31",
+          target_size: "16", estimated_target_notional: "2000", action: "buy", order_qty: "16", protect_px: (Number(mid) + 0.02).toFixed(2),
           reduce_only: false, asset: 110086, nonce: null, cloid: null, status: "prepared", confirmed_qty: "0",
           avg_px: null, oid: null, result: null, final_size: null, final_notional: null },
         { coin: "xyz:CRWV", position_side: "short", current_size: "0", current_notional: "0", mid_px: "44.65",
@@ -423,8 +423,8 @@ test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
   const execute = dialog.getByRole("button", { name: "本地签名并下单" });
   await expect(execute).toBeEnabled();
 
-  mid = "123.31";
-  await expect(dialog.getByText("盘口已变化，当前预览已过期，请重新预览后再执行。", { exact: true })).toBeVisible({ timeout: 9000 });
+  mid = "123.40";
+  await expect(dialog.getByText("盘口已超出保护价，当前预览已过期，请重新预览后再执行。", { exact: true })).toBeVisible({ timeout: 9000 });
   await expect(execute).toBeDisabled();
   await dialog.getByRole("button", { name: "按最新盘口重新预览" }).click();
   await expect(execute).toBeEnabled();

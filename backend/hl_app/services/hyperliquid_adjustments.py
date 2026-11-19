@@ -47,6 +47,12 @@ def _leg_indices(value: list[int] | None) -> list[int]:
     return sorted(value)
 
 
+def _slippage(value: int) -> int:
+    if type(value) is not int or not 1 <= value <= 50:
+        raise AdjustmentError(422, "最大滑点必须为 1–50 个基点")
+    return value
+
+
 def _maximum() -> Decimal:
     value = _decimal(os.environ.get("HL_APP_MAX_LEG_NOTIONAL_USD", "15000"), "每腿名义上限")
     if value <= 0:
@@ -79,7 +85,7 @@ def _resolve(url: str, pair_id: str, account_address: str, config_revision: str,
 
 def _parse_report(
     stdout: str, descriptor: dict, account: str, target: Decimal, config_revision: str | None = None,
-    leg_indices: list[int] | None = None,
+    leg_indices: list[int] | None = None, max_slippage_bps: int | None = None,
 ) -> dict | None:
     selected = _leg_indices(leg_indices)
     try:
@@ -101,6 +107,8 @@ def _parse_report(
         or len(report["legs"]) != 2
     ):
         raise AdjustmentError(503, "调仓结果身份校验失败")
+    if max_slippage_bps is not None and (type(report.get("max_slippage_bps")) is not int or report["max_slippage_bps"] != max_slippage_bps):
+        raise AdjustmentError(503, "执行器未确认本次最大滑点；请更新执行器后重新预览")
     if {leg.get("coin") for leg in report["legs"] if isinstance(leg, dict)} != set(descriptor["coins"]):
         raise AdjustmentError(503, "调仓结果合约身份校验失败")
     return report
@@ -124,7 +132,8 @@ def _invoke(
     except HyperliquidUnavailable as exc:
         detail = "调仓进程中断，订单结果未知；禁止重试，请先核对交易所记录" if execute else "调仓预览或签名准备超时"
         raise AdjustmentError(503, detail) from exc
-    report = _parse_report(stdout, descriptor, account, target, config_revision, leg_indices)
+    expected_slippage = int(argv[argv.index("--max-slippage-bps") + 1]) if "--max-slippage-bps" in argv else None
+    report = _parse_report(stdout, descriptor, account, target, config_revision, leg_indices, expected_slippage)
     if report is not None:
         return report
     if proc.returncode == 2:
@@ -137,7 +146,7 @@ def _invoke(
 
 def _base_argv(
     descriptor: dict, account: str, target: Decimal, command: str,
-    leg_indices: list[int] | None = None,
+    leg_indices: list[int] | None = None, max_slippage_bps: int = 5,
 ) -> list[str]:
     binary = os.environ.get("HL_APP_TRADER_BIN", "").strip()
     config = os.environ.get("HL_APP_PAIRS_CONFIG", "").strip()
@@ -147,7 +156,7 @@ def _base_argv(
     argv = [
         binary, "--config", config, command, "--pair", descriptor["id"],
         "--address", account, "--notional", _decimal_arg(target),
-        "--max-notional", _decimal_arg(_maximum()), "--json",
+        "--max-notional", _decimal_arg(_maximum()), "--max-slippage-bps", str(_slippage(max_slippage_bps)), "--json",
     ]
     if selected != [0, 1]:
         for index in selected:
@@ -165,9 +174,10 @@ def _state_dir() -> str:
 def _run(
     descriptor: dict, account: str, target: Decimal, execute: bool,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
     selected = _leg_indices(leg_indices)
-    argv = _base_argv(descriptor, account, target, "adjust", selected)
+    argv = _base_argv(descriptor, account, target, "adjust", selected, max_slippage_bps)
     if execute:
         if not _execution_ready():
             raise AdjustmentError(503, "真实调仓未开启或 agent/回执目录未配置")
@@ -181,16 +191,18 @@ def _run(
 def preview(
     url: str, pair_id: str, account_address: str, config_revision: str, target_notional: str,
     owner_account_id: int | None = None, leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
+    max_slippage_bps = _slippage(max_slippage_bps)
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     if selected == [0, 1]:
-        report = _run(descriptor, account, target, execute=False)
+        report = _run(descriptor, account, target, execute=False, max_slippage_bps=max_slippage_bps)
     else:
-        report = _run(descriptor, account, target, execute=False, leg_indices=selected)
+        report = _run(descriptor, account, target, execute=False, leg_indices=selected, max_slippage_bps=max_slippage_bps)
     report["execution_enabled"] = _execution_ready()
     report["browser_wallet_enabled"] = True
     report["max_leg_notional_usd"] = _decimal_arg(_maximum())
@@ -206,7 +218,9 @@ def execute(
     confirmation: str,
     owner_account_id: int | None = None,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
+    max_slippage_bps = _slippage(max_slippage_bps)
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
@@ -216,8 +230,8 @@ def execute(
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     try:
         if selected == [0, 1]:
-            return _run(descriptor, account, target, execute=True)
-        return _run(descriptor, account, target, execute=True, leg_indices=selected)
+            return _run(descriptor, account, target, execute=True, max_slippage_bps=max_slippage_bps)
+        return _run(descriptor, account, target, execute=True, leg_indices=selected, max_slippage_bps=max_slippage_bps)
     finally:
         pairs_service.clear_runtime_cache()
 
@@ -238,14 +252,16 @@ def prepare_browser(
     expected_signer: str,
     owner_account_id: int | None = None,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
+    max_slippage_bps = _slippage(max_slippage_bps)
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
-    argv = _base_argv(descriptor, account, target, "adjust-prepare", selected)
+    argv = _base_argv(descriptor, account, target, "adjust-prepare", selected, max_slippage_bps)
     argv.extend(["--state-dir", _state_dir(), "--signer", signer])
     if selected == [0, 1]:
         report = _invoke(argv, descriptor, account, target, execute=False)
@@ -289,7 +305,9 @@ def submit_browser(
     signatures: list[dict],
     owner_account_id: int | None = None,
     leg_indices: list[int] | None = None,
+    max_slippage_bps: int = 5,
 ) -> dict:
+    max_slippage_bps = _slippage(max_slippage_bps)
     target = _decimal(target_notional, "每腿目标名义")
     if target < 0 or target > Decimal("1000000"):
         raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
@@ -303,7 +321,7 @@ def submit_browser(
         or any(character not in "0123456789abcdef" for character in action_id[9:])
     ):
         raise AdjustmentError(422, "调仓动作 ID 非法")
-    argv = _base_argv(descriptor, account, target, "adjust-submit", selected)
+    argv = _base_argv(descriptor, account, target, "adjust-submit", selected, max_slippage_bps)
     argv.extend([
         "--state-dir", _state_dir(), "--signer", signer,
         "--action-id", action_id, "--signatures", json.dumps(checked, separators=(",", ":")),

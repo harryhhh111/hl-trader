@@ -43,15 +43,34 @@ def report(revision: str, status: str = "preview") -> dict:
         "config_revision": revision,
         "account_address": ADDRESS_LOWER,
         "target_notional": "2000",
+        "max_slippage_bps": 5,
         "created_at": "2026-10-30T00:00:00Z",
         "legs": [{"coin": "xyz:NBIS"}, {"coin": "xyz:CRWV"}],
         "diagnostics": [],
     }
 
 
+@pytest.mark.parametrize("value", [0, 51, True, 5.0, "5"])
+def test_invalid_slippage_is_rejected_before_running(value, monkeypatch):
+    monkeypatch.setattr(adjustments, "_resolve", lambda *_args: pytest.fail("must not resolve"))
+    with pytest.raises(adjustments.AdjustmentError, match="最大滑点"):
+        adjustments.preview("unused", "pair", ADDRESS_LOWER, "0" * 64, "2000", max_slippage_bps=value)
+
+
+def test_custom_slippage_reaches_cli_and_report_must_confirm_it(configured):
+    descriptor = next(item for item in pairs.load_pairs()[1] if item["id"] == "nbis-crwv")
+    argv = adjustments._base_argv(descriptor, ADDRESS_LOWER, Decimal("2000"), "adjust", max_slippage_bps=10)
+    assert argv[argv.index("--max-slippage-bps") + 1] == "10"
+    for payload in (report(configured), {key: value for key, value in report(configured).items() if key != "max_slippage_bps"}):
+        with pytest.raises(adjustments.AdjustmentError, match="未确认本次最大滑点"):
+            adjustments._parse_report(json.dumps(payload), descriptor, ADDRESS_LOWER, Decimal("2000"), max_slippage_bps=10)
+    payload = {**report(configured), "max_slippage_bps": 10}
+    assert adjustments._parse_report(json.dumps(payload), descriptor, ADDRESS_LOWER, Decimal("2000"), max_slippage_bps=10) == payload
+
+
 def test_preview_resolves_active_identity_and_passes_decimal_target(configured, monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr(adjustments, "_run", lambda descriptor, account, target, execute: calls.append(
+    monkeypatch.setattr(adjustments, "_run", lambda descriptor, account, target, execute, **_kwargs: calls.append(
         (descriptor["id"], account, target, execute),
     ) or report(configured))
     result = adjustments.preview("postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured, "2000")
@@ -69,7 +88,7 @@ def test_default_leg_notional_limit_is_15000(monkeypatch) -> None:
 def test_selected_leg_scope_is_passed_and_checked(configured, monkeypatch) -> None:
     calls = []
 
-    def run(_descriptor, _account, _target, execute, leg_indices=None):
+    def run(_descriptor, _account, _target, execute, leg_indices=None, **_kwargs):
         calls.append((execute, leg_indices))
         return {**report(configured), "leg_indices": [0]}
 
@@ -102,7 +121,7 @@ def test_execute_requires_exact_confirmation_and_clears_snapshot_cache(configure
     with pytest.raises(adjustments.AdjustmentError, match="确认金额"):
         adjustments.execute("postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured, "2000", "1000")
     calls = []
-    monkeypatch.setattr(adjustments, "_run", lambda descriptor, account, target, execute: calls.append(execute) or report(configured, "succeeded"))
+    monkeypatch.setattr(adjustments, "_run", lambda descriptor, account, target, execute, **_kwargs: calls.append(execute) or report(configured, "succeeded"))
     cleared = []
     monkeypatch.setattr(pairs, "clear_runtime_cache", lambda: cleared.append(True))
     result = adjustments.execute("postgresql://runtime", "nbis-crwv", ADDRESS_LOWER, configured, "2000", "2000")
@@ -143,11 +162,12 @@ def test_http_preview_and_execute_contract(configured, monkeypatch) -> None:
     app.include_router(hyperliquid.router, prefix="/api/v1")
     app.dependency_overrides[require_session] = lambda: None
     client = TestClient(app)
-    monkeypatch.setattr(adjustments, "_run", lambda _descriptor, _account, _target, execute: report(
+    monkeypatch.setattr(adjustments, "_run", lambda _descriptor, _account, _target, execute, **_kwargs: report(
         configured, "succeeded" if execute else "preview",
     ))
     body = {
         "target_notional": "2000",
+        "max_slippage_bps": 5,
         "account_address": ADDRESS_LOWER,
         "config_revision": configured,
     }
@@ -241,6 +261,7 @@ def test_http_browser_prepare_and_submit_contract(configured, monkeypatch) -> No
     monkeypatch.setattr(adjustments, "_invoke", invoke)
     body = {
         "target_notional": "2000",
+        "max_slippage_bps": 5,
         "account_address": ADDRESS_LOWER,
         "config_revision": configured,
         "expected_signer": API_WALLET,

@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::dashboard::config::{self, DashboardPair};
+use crate::execution_price::{self, DepthCheck};
 use crate::hyperliquid::{
     AccountView, Adapter, AdapterError, BboView, PlaceOutcome, cloid_hex, find_market, parse_cloid,
 };
@@ -75,6 +76,8 @@ pub struct AdjustmentLeg {
     pub action: String,
     pub order_qty: Decimal,
     pub protect_px: Decimal,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<DepthCheck>,
     pub reduce_only: bool,
     pub cloid: Option<String>,
     pub status: AdjustmentLegStatus,
@@ -102,6 +105,8 @@ pub struct AdjustmentReport {
     pub config_revision: String,
     pub account_address: String,
     pub target_notional: Decimal,
+    #[serde(default)]
+    pub max_slippage_bps: u32,
     #[serde(default = "default_leg_indices")]
     pub leg_indices: Vec<usize>,
     pub created_at: String,
@@ -133,6 +138,7 @@ pub struct AdjustRequest<'a> {
     pub account: Address,
     pub target_notional: Decimal,
     pub max_notional: Decimal,
+    pub max_slippage_bps: u32,
     pub leg_indices: [bool; 2],
     pub state_dir: &'a Path,
     pub request_id: Option<&'a str>,
@@ -373,6 +379,9 @@ async fn build_plan(
     request: &AdjustRequest<'_>,
     action_id: Option<String>,
 ) -> Result<Plan, AdjustError> {
+    if !(1..=execution_price::MAX_SLIPPAGE_BPS).contains(&request.max_slippage_bps) {
+        return Err(AdjustError::Refused("最大滑点必须为 1–50 个基点".into()));
+    }
     if request.max_notional <= Decimal::ZERO {
         return Err(AdjustError::Refused("每腿名义上限必须为正数".into()));
     }
@@ -422,8 +431,8 @@ async fn build_plan(
     let mut legs = Vec::with_capacity(2);
     for index in 0..2 {
         let market = &markets[index];
-        let book = adapter.bbo(&market.name).await?;
-        let mid = mid(&book, &market.name)?;
+        let book = adapter.order_book(&market.name).await?;
+        let mid = mid(&book.bbo(), &market.name)?;
         let current_signed = start_positions[index];
         let current_size = current_signed.abs();
         let selected = request.leg_indices[index];
@@ -450,7 +459,7 @@ async fn build_plan(
             ("none", Decimal::ZERO, false)
         };
         let mut protect = if order_qty > Decimal::ZERO {
-            pair::protect_price(market, action == "buy", &book)
+            execution_price::limit_price(market, action == "buy", mid, request.max_slippage_bps)
                 .map_err(|error| AdjustError::Refused(error.to_string()))?
         } else {
             Decimal::ZERO
@@ -466,6 +475,20 @@ async fn build_plan(
             order_qty = Decimal::ZERO;
             protect = Decimal::ZERO;
         }
+        let depth = if order_qty > Decimal::ZERO {
+            Some(
+                execution_price::check_depth(
+                    &book,
+                    action == "buy",
+                    order_qty,
+                    protect,
+                    crate::hyperliquid::now_epoch_ms()?,
+                )
+                .map_err(AdjustError::Refused)?,
+            )
+        } else {
+            None
+        };
         let cloid = if action_id.is_some() && order_qty > Decimal::ZERO {
             Some(cloid_hex(new_cloid()?))
         } else {
@@ -484,6 +507,7 @@ async fn build_plan(
             action: action.into(),
             order_qty,
             protect_px: protect,
+            depth,
             reduce_only,
             cloid,
             status: if order_qty > Decimal::ZERO {
@@ -524,6 +548,7 @@ async fn build_plan(
             config_revision: request.config_revision.into(),
             account_address: format!("{}", request.account).to_lowercase(),
             target_notional: request.target_notional,
+            max_slippage_bps: request.max_slippage_bps,
             leg_indices: selected_leg_indices(request),
             created_at: now_utc(),
             legs,
@@ -574,15 +599,16 @@ fn finish_unknown(report: &mut AdjustmentReport, detail: String) {
         .push("结果未知，禁止直接重试；请先按 cloid、成交记录和实际持仓人工核对".into());
 }
 
-async fn latest_protect_price(
-    adapter: &Adapter,
-    market: &PerpMarket,
-    leg: &AdjustmentLeg,
-) -> Result<Decimal, AdjustError> {
-    let book = adapter.bbo(&market.name).await?;
-    mid(&book, &market.name)?;
-    pair::protect_price(market, leg.action == "buy", &book)
-        .map_err(|error| AdjustError::Refused(error.to_string()))
+async fn latest_depth(adapter: &Adapter, leg: &AdjustmentLeg) -> Result<DepthCheck, AdjustError> {
+    let book = adapter.order_book(&leg.coin).await?;
+    execution_price::check_depth(
+        &book,
+        leg.action == "buy",
+        leg.order_qty,
+        leg.protect_px,
+        crate::hyperliquid::now_epoch_ms()?,
+    )
+    .map_err(AdjustError::Refused)
 }
 
 fn stop_before_send(
@@ -685,34 +711,27 @@ pub async fn run_adjust(
             save_after_write(&store, &report)?;
             return Ok(report);
         }
-        let latest =
-            match latest_protect_price(adapter, &plan.markets[index], &report.legs[index]).await {
-                Ok(price) => price,
-                Err(error) => {
-                    return stop_before_send(
-                        &store,
-                        report,
-                        format!("{} 发送前刷新盘口失败: {error}", plan.markets[index].name),
-                    );
-                }
-            };
-        if report.legs[index].order_qty * latest < Decimal::TEN {
+        let latest = match latest_depth(adapter, &report.legs[index]).await {
+            Ok(price) => price,
+            Err(error) => {
+                report.legs[index].depth = None;
+                return stop_before_send(
+                    &store,
+                    report,
+                    format!("{} 发送前刷新盘口失败: {error}", plan.markets[index].name),
+                );
+            }
+        };
+        report.legs[index].depth = Some(latest);
+        if report.legs[index].order_qty * report.legs[index].protect_px < Decimal::TEN {
             return stop_before_send(
                 &store,
                 report,
                 format!(
-                    "{} 按发送前最新保护价 {latest} 计算低于最小下单名义 10 USD，订单未发送",
+                    "{} 按发送前保护价计算低于最小下单名义 10 USD，订单未发送",
                     plan.markets[index].name
                 ),
             );
-        }
-        let previous = report.legs[index].protect_px;
-        if latest != previous {
-            report.legs[index].protect_px = latest;
-            report.diagnostics.push(format!(
-                "{} 发送前保护价已由 {previous} 刷新为 {latest}",
-                plan.markets[index].name
-            ));
         }
         report.status = AdjustmentStatus::Executing;
         report.legs[index].status = AdjustmentLegStatus::Pending;
@@ -1056,6 +1075,8 @@ pub async fn submit_browser_adjustment(
         || report.account_address != format!("{}", request.account).to_lowercase()
         || report.config_revision != request.config_revision
         || report.leg_indices != selected_leg_indices(request)
+        || report.max_slippage_bps != request.max_slippage_bps
+        || report.target_notional != request.target_notional
     {
         return Err(AdjustError::Refused(
             "调仓动作身份或状态已变化，请重新预览并签名".into(),
@@ -1182,10 +1203,10 @@ pub async fn submit_browser_adjustment(
             save_after_write(&store, &report)?;
             return Ok(report);
         }
-        let latest = match latest_protect_price(adapter, &markets[index], &report.legs[index]).await
-        {
+        let latest = match latest_depth(adapter, &report.legs[index]).await {
             Ok(price) => price,
             Err(error) => {
+                report.legs[index].depth = None;
                 return stop_before_send(
                     &store,
                     report,
@@ -1193,17 +1214,7 @@ pub async fn submit_browser_adjustment(
                 );
             }
         };
-        let signed_price = report.legs[index].protect_px;
-        if latest != signed_price {
-            return stop_before_send(
-                &store,
-                report,
-                format!(
-                    "{} 的已签名保护价 {signed_price} 与发送前最新保护价 {latest} 不同，订单未发送；请重新预览并签名",
-                    markets[index].name
-                ),
-            );
-        }
+        report.legs[index].depth = Some(latest);
         report.status = AdjustmentStatus::Executing;
         report.legs[index].status = AdjustmentLegStatus::Pending;
         store.save(&report)?;
@@ -1341,6 +1352,7 @@ mod tests {
                 account: USER.parse().unwrap(),
                 target_notional: Decimal::new(2000, 0),
                 max_notional: Decimal::new(5000, 0),
+                max_slippage_bps: execution_price::DEFAULT_SLIPPAGE_BPS,
                 leg_indices: [true, true],
                 state_dir: &self.state_dir,
                 request_id: None,
@@ -1433,11 +1445,11 @@ mod tests {
         let books: BookQueues = Arc::new(Mutex::new(HashMap::from([
             (
                 "xyz:NBIS".into(),
-                VecDeque::from([("9.9".into(), "10.1".into())]),
+                VecDeque::from([("9.999".into(), "10.001".into())]),
             ),
             (
                 "xyz:CRWV".into(),
-                VecDeque::from([("49.75".into(), "50.25".into())]),
+                VecDeque::from([("49.999".into(), "50.001".into())]),
             ),
         ])));
         for coin in ["xyz:NBIS", "xyz:CRWV"] {
@@ -1458,8 +1470,8 @@ mod tests {
                     httpmock::HttpMockResponse::builder()
                         .status(200)
                         .body(format!(
-                            r#"{{"coin":"{coin}","time":1760000000000,"snapshot":true,
-                                "levels":[[{{"px":"{bid}","sz":"1000","n":1}}],[{{"px":"{ask}","sz":"1000","n":1}}]]}}"#
+                            r#"{{"coin":"{coin}","time":{book_time},"snapshot":true,
+                                "levels":[[{{"px":"{bid}","sz":"1000","n":1}}],[{{"px":"{ask}","sz":"1000","n":1}}]]}}"#, book_time = crate::hyperliquid::now_epoch_ms().unwrap()
                         ))
                         .build()
                 });
@@ -1696,7 +1708,7 @@ mod tests {
         assert_eq!(quote.legs.len(), 2);
         assert_eq!(quote.legs[0].mid, Decimal::TEN);
         assert_eq!(quote.legs[1].mid, Decimal::new(50, 0));
-        assert_eq!(quote.legs[0].book_time, "2025-10-09T08:53:20.000Z");
+        assert!(quote.legs[0].book_time.ends_with('Z'));
     }
 
     #[test]
@@ -1894,32 +1906,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn managed_execution_refreshes_each_protect_price_before_signing() {
+    async fn managed_execution_rechecks_depth_within_fixed_slippage_cap() {
         let (server, fixture) = setup(vec![account("0", "0"), account("200", "-40")]).await;
         {
             let mut books = fixture.books.lock().unwrap();
             books
                 .get_mut("xyz:NBIS")
                 .unwrap()
-                .push_back(("10".into(), "10.2".into()));
+                .push_back(("10".into(), "10.002".into()));
             books
                 .get_mut("xyz:CRWV")
                 .unwrap()
-                .push_back(("49.85".into(), "50.35".into()));
+                .push_back(("49.998".into(), "50.002".into()));
         }
         let first = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/exchange")
                 .body_includes(r#""a":110000"#)
-                .body_includes(r#""p":"10.202""#);
-            then.status(200).body(filled(11, "200", "10.2"));
+                .body_includes(r#""p":"10.005""#);
+            then.status(200).body(filled(11, "200", "10.002"));
         });
         let second = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
                 .path("/exchange")
                 .body_includes(r#""a":110001"#)
-                .body_includes(r#""p":"49.848""#);
-            then.status(200).body(filled(12, "40", "49.85"));
+                .body_includes(r#""p":"49.975""#);
+            then.status(200).body(filled(12, "40", "49.998"));
         });
         let report = run_adjust(
             &Adapter::with_base_url(&server.base_url()),
@@ -1932,22 +1944,109 @@ mod tests {
 
         assert_eq!(report.status, AdjustmentStatus::Succeeded, "{report:?}");
         assert_eq!(report.legs[0].mid_px, Decimal::TEN);
-        assert_eq!(report.legs[0].protect_px, Decimal::new(10202, 3));
-        assert_eq!(report.legs[1].protect_px, Decimal::new(49848, 3));
+        assert_eq!(report.legs[0].protect_px, Decimal::new(10005, 3));
+        assert_eq!(report.legs[1].protect_px, Decimal::new(49975, 3));
         assert_eq!(first.calls(), 1);
         assert_eq!(second.calls(), 1);
+        assert_eq!(
+            report.legs[0].depth.as_ref().unwrap().worst_fill_px,
+            Decimal::new(10002, 3)
+        );
+        assert_eq!(report.max_slippage_bps, 5);
+    }
+
+    #[tokio::test]
+    async fn insufficient_depth_in_plan_sends_no_orders() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let exchange = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/exchange");
+            then.status(500);
+        });
+        // Visible liquidity has 1000 units, while the order requires 2000.
+        let mut request = fixture.request();
+        request.target_notional = Decimal::new(20000, 0);
+        request.max_notional = Decimal::new(25000, 0);
+        let error = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &request,
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("深度不足"));
+        assert_eq!(exchange.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn second_leg_depth_loss_preserves_first_fill_without_sending_second() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        fixture
+            .books
+            .lock()
+            .unwrap()
+            .get_mut("xyz:CRWV")
+            .unwrap()
+            .push_back(("49.970".into(), "50.001".into()));
+        let first = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110000"#);
+            then.status(200).body(filled(11, "200", "10.001"));
+        });
+        let second = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/exchange")
+                .body_includes(r#""a":110001"#);
+            then.status(500);
+        });
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            Some(&signer()),
+            &fixture.request(),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.status, AdjustmentStatus::Incomplete);
+        assert_eq!(report.legs[0].status, AdjustmentLegStatus::Filled);
+        assert_eq!(report.legs[1].status, AdjustmentLegStatus::NotSent);
+        assert!(report.legs[1].depth.is_none());
         assert!(
             report
                 .diagnostics
                 .iter()
-                .any(|line| line.contains("10.102") && line.contains("10.202"))
+                .any(|line| line.contains("深度不足"))
         );
-        assert!(
-            report
-                .diagnostics
-                .iter()
-                .any(|line| line.contains("49.748") && line.contains("49.848"))
-        );
+        assert_eq!(first.calls(), 1);
+        assert_eq!(second.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn browser_rejects_policy_change_after_signing() {
+        let (server, fixture) = setup(vec![account("0", "0")]).await;
+        let exchange = server.mock(|when, then| {
+            when.method(httpmock::Method::POST).path("/exchange");
+            then.status(500);
+        });
+        let adapter = Adapter::with_base_url(&server.base_url());
+        let wallet = test_wallet();
+        let prepared = prepare_browser_adjustment(&adapter, &fixture.request(), wallet.address())
+            .await
+            .unwrap();
+        let mut request = fixture.request();
+        request.max_slippage_bps = 10;
+        let error = submit_browser_adjustment(
+            &adapter,
+            &request,
+            wallet.address(),
+            prepared.action_id.as_deref().unwrap(),
+            sign_browser_requests(&prepared, &wallet),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("身份或状态已变化"));
+        assert_eq!(exchange.calls(), 0);
     }
 
     #[tokio::test]
@@ -2202,12 +2301,12 @@ mod tests {
                 .iter()
                 .all(|leg| leg.status == AdjustmentLegStatus::NotSent)
         );
-        assert_eq!(report.legs[0].protect_px, Decimal::new(10102, 3));
+        assert_eq!(report.legs[0].protect_px, Decimal::new(10005, 3));
         assert!(
             report
                 .diagnostics
                 .iter()
-                .any(|line| line.contains("请重新预览并签名"))
+                .any(|line| line.contains("深度不足"))
         );
         assert_eq!(exchange.calls(), 0);
     }
