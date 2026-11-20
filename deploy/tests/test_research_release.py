@@ -35,14 +35,21 @@ class FakeRuntime(release.ResearchRelease):
         self.calls.append(args)
         if args[:2] == ["docker", "inspect"]:
             return json.dumps(list(self.state.values())).encode()
+        if args[:3] == ["docker", "image", "inspect"]:
+            return json.dumps([{"Id": args[3]}]).encode()
         if args[:2] == ["docker", "exec"]:
+            if "nginx" in args:
+                return b""
             if kwargs["input"] == release.RUNNING_EXECUTIONS.encode():
                 return json.dumps({"running": self.running_executions}).encode()
             return json.dumps({"health": "ok", "cli_sha256": "same-cli",
+                               "snapshot_id": "same-snapshot",
                                "public_authenticated_browser_verified": False}).encode()
         if args[:2] == ["docker", "run"]:
             return self.built_cli
         if args[:2] == ["docker", "tag"]:
+            if args[-1] == "hl-app-web:local":
+                self.prepared_image = args[2]
             return b""
         if args[:2] == ["git", "rev-parse"]:
             return b"abcdef1234567890\n"
@@ -60,6 +67,8 @@ class FakeRuntime(release.ResearchRelease):
             for name in selected + (["worker"] if self.change_worker else []):
                 self.state[name]["Id"] += "-new"
                 self.state[name]["Image"] += "-new"
+                if name == "web" and hasattr(self, "prepared_image"):
+                    self.state[name]["Image"] = self.prepared_image
             return b""
         raise AssertionError("Unexpected command: " + repr(args))
 
@@ -134,6 +143,57 @@ class ResearchReleaseTests(unittest.TestCase):
         self.assertEqual(result["status"], "verified")
         self.assertEqual(worker, self.tool.state["worker"])
         self.assertEqual(set(result["rollback_tags"]), {"web", "gateway"})
+
+    def prepared_record(self, **updates):
+        payload = {"status": "built_not_deployed", "commit": "reviewed-commit", "cli_unchanged": True,
+                   "base_web_image": self.tool.state["web"]["Image"], "candidate_image": "candidate-image"}
+        payload.update(updates)
+        path = self.root / "build.json"
+        path.write_text(json.dumps(payload))
+        return path
+
+    def test_prepared_plan_is_read_only(self):
+        result = self.tool.deploy_prepared_web(self.prepared_record())
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(self.tool.calls, [])
+
+    def test_prepared_image_updates_only_web_without_building(self):
+        before = copy.deepcopy(self.tool.state)
+        result = self.tool.deploy_prepared_web(self.prepared_record(), apply=True)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(self.tool.state["web"]["Image"], "candidate-image")
+        for service in ("worker", "gateway"):
+            self.assertEqual(self.tool.state[service], before[service])
+        self.assertIn("--no-build", self.tool.switched()[0])
+        self.assertEqual(self.tool.switched()[0][-1], "web")
+        self.assertFalse(any(c[:len(self.tool.compose)+1] == self.tool.compose+["build"] for c in self.tool.calls))
+        self.assertIn(["docker", "exec", "gateway-old", "nginx", "-s", "reload"], self.tool.calls)
+        self.assertNotIn(SECRET, json.dumps(result))
+
+    def test_prepared_image_requires_matching_base(self):
+        with self.assertRaisesRegex(release.ReleaseError, "基础版本"):
+            self.tool.deploy_prepared_web(self.prepared_record(base_web_image="other-base"), apply=True)
+        self.assertEqual(self.tool.switched(), [])
+        self.assertFalse(any(c[:2] == ["docker", "tag"] for c in self.tool.calls))
+
+    def test_prepared_image_requires_same_cli(self):
+        self.tool.built_cli = b"different-cli"
+        with self.assertRaisesRegex(release.ReleaseError, "交易 CLI"):
+            self.tool.deploy_prepared_web(self.prepared_record(), apply=True)
+        self.assertEqual(self.tool.switched(), [])
+
+    def test_prepared_image_stops_before_switch_when_execution_is_running(self):
+        self.tool.running_executions = 1
+        with self.assertRaises(release.ReleaseError):
+            self.tool.deploy_prepared_web(self.prepared_record(), apply=True)
+        self.assertEqual(self.tool.switched(), [])
+        self.assertFalse(any(c[:2] == ["docker", "tag"] for c in self.tool.calls))
+
+    def test_prepared_image_detects_unexpected_worker_change(self):
+        self.tool.change_worker = True
+        with self.assertRaises(release.ReleaseError):
+            self.tool.deploy_prepared_web(self.prepared_record(), apply=True)
+        self.assertEqual(list(self.tool.records.glob("*.deployed.json")), [])
 
     def test_mount_change_stops_before_build(self):
         self.tool.config["services"]["gateway"]["volumes"] = [

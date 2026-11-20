@@ -37,6 +37,24 @@ python3 deploy/research_release.py verify --expect-text '新页面阅读'
 
 每次发布使用时间、提交和随机后缀生成独立记录与回退标签，私有记录存入 `.runtime/deployments/`，包含配置指纹而非配置原文。失败会留下 `.failed.json`，不会自动回退；构建失败时可能尚未切换，切换后失败时应检查实际容器状态。按记录中的镜像标签恢复需要部署授权，Web 回退同样需核对运行中的执行请求。
 
+### 已验证的 Web 修复镜像
+
+已有隔离构建和验证记录时，使用预构建发布模式，避免重新构建时混入工作区其他改动：
+
+```sh
+# 默认只展示计划；经授权加 --apply 才更新 Web
+python3 deploy/research_release.py deploy-prepared-web \
+  --build-record .runtime/deployments/research-standalone-build-5a81b3259cf5.json --apply
+
+# 只读检查运行中 Web 的独立 HTML 处理函数与挂载内容
+python3 deploy/verify_research_standalone.py \
+  --snapshot s7658fcec893ae6e0a4ff5f57acdc32f0 --report-id sndk-main
+```
+
+发布工具要求线上 Web 与构建记录中的基础镜像一致、候选 CLI 与线上一致、没有运行中的执行请求，先保留回退镜像，再用 `up --no-deps --no-build` 仅替换 Web。gateway 容器保留，重新加载 nginx 配置以解析新 Web 地址；worker 保留。切换后比较配置/挂载、CLI、研究快照及服务状态并记录证据。失败记录不代表已回退，须按 `.before.json` 中的回退标签核对实际状态。
+
+独立 HTML 核验在容器内创建隔离的 TestClient，使用测试鉴权调用已安装的报告路由，不创建真实账号会话，也不改变线上鉴权；范围是处理函数与挂载文件，不等于公网登录后的浏览器检查。可加 `--record .runtime/deployments/文件名.json` 保存私有证据。
+
 ## 同步研究库与线上内容
 
 研究库更新不会自动改变网页：线上读取独立快照。只更新报告与列表时，使用 `deploy/sync_research_reports.py`，无需构建应用镜像或重启 Web、gateway、worker。

@@ -1,6 +1,6 @@
 """Repeatable research release operations; plan is offline, verify is read-only.
 
-Only ``deploy --apply`` changes running services. Deployment authorization is
+Only deployment commands with ``--apply`` change running services. Authorization is
 still governed by AGENTS.md. Credentials never appear in records or arguments.
 """
 from __future__ import annotations
@@ -260,6 +260,76 @@ class ResearchRelease:
                 write_record(prefix.with_suffix(".failed.json"), record)
                 raise ReleaseError(f"发布未完成；原版本、回退标签与阶段记录保存在 {prefix.name}.*.json") from exc
 
+    def deploy_prepared_web(self, build_record, *, apply=False):
+        """Install a verified overlay image; never build from the working tree."""
+        build = json.loads(Path(build_record).read_text())
+        command = self.compose + ["up", "-d", "--no-deps", "--no-build", "--force-recreate",
+                                  "--wait", "--wait-timeout", "120", "web"]
+        if not apply:
+            return {"dry_run": True, "candidate_image": build["candidate_image"], "commands": [command],
+                    "preserved_services": ["gateway", "worker"], "gateway_config_reload": True}
+        with self.lock():
+            before = self.capture()
+            self.check_configuration(before, "web")
+            if before["web"]["Image"] != build["base_web_image"]:
+                raise ReleaseError("线上 Web 已变更，候选镜像的基础版本不匹配")
+            if build.get("status") != "built_not_deployed" or build.get("cli_unchanged") is not True:
+                raise ReleaseError("候选镜像缺少已验证的构建记录")
+            candidate = build["candidate_image"]
+            inspected = json.loads(self.run(["docker", "image", "inspect", candidate]))[0]
+            if inspected["Id"] != candidate:
+                raise ReleaseError("候选镜像标识不匹配")
+            old = self.verify(state=before)
+            cli = self.run(["docker", "run", "--rm", "--network", "none", "--read-only", candidate,
+                            "python", "-c", "import hashlib;print(hashlib.sha256(open('/usr/local/bin/hl-trader','rb').read()).hexdigest())"]).decode().strip()
+            if cli != old["verification"]["cli_sha256"]:
+                raise ReleaseError("候选镜像的交易 CLI 与线上不同")
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+            prefix = self.records / ("research-prepared-web-" + stamp)
+            rollback_tag = "hl-app-web:before-research-prepared-" + stamp
+            record = {"status": "prepared", "build_record": str(build_record), "code_commit": build["commit"],
+                      "candidate_image": candidate, "before": old, "rollback_tag": rollback_tag,
+                      "commands": [command]}
+            write_record(prefix.with_suffix(".before.json"), record)
+            try:
+                running = json.loads(self.run(["docker", "exec", "-i", before["web"]["Id"], "python", "-"],
+                                              input=RUNNING_EXECUTIONS.encode()))["running"]
+                if running != 0:
+                    raise ReleaseError("存在运行中的执行请求，本轮未切换服务")
+                current = self.capture()
+                if any(current[s]["Id"] != before[s]["Id"] for s in SERVICES):
+                    raise ReleaseError("准备期间服务实例发生变化，本轮未切换服务")
+                self.check_configuration(current, "web")
+                self.run(["docker", "tag", before["web"]["Image"], rollback_tag])
+                self.run(["docker", "tag", candidate, "hl-app-web:local"])
+                self.run(command, capture=False, timeout=240)
+                # nginx resolves the Web name at configuration load time.
+                # Reload workers to resolve the new address, preserving its container.
+                self.run(["docker", "exec", before["gateway"]["Id"], "nginx", "-t"])
+                self.run(["docker", "exec", before["gateway"]["Id"], "nginx", "-s", "reload"])
+                after = self.capture()
+                if after["web"]["Image"] != candidate:
+                    raise ReleaseError("Web 没有使用指定候选镜像")
+                for service in SERVICES:
+                    previous, actual = public_container(before[service]), public_container(after[service])
+                    if service != "web" and previous != actual:
+                        raise ReleaseError("应保持不变的服务发生变化：" + service)
+                    if any(previous[k] != actual[k] for k in ("app_environment_sha256", "mounts_sha256")):
+                        raise ReleaseError("运行配置发生变化：" + service)
+                verified = self.verify(state=after)
+                if verified["verification"]["cli_sha256"] != cli:
+                    raise ReleaseError("部署后的交易 CLI 核对失败")
+                if verified["verification"]["snapshot_id"] != old["verification"]["snapshot_id"]:
+                    raise ReleaseError("发布期间研究快照发生变化")
+                record.update(status="verified", after=verified, gateway_config_reloaded=True,
+                              database_migration_executed=False, orders_submitted=False)
+                write_record(prefix.with_suffix(".deployed.json"), record)
+                return record
+            except Exception as exc:
+                record.update(status="failed", failure_type=type(exc).__name__)
+                write_record(prefix.with_suffix(".failed.json"), record)
+                raise ReleaseError(f"预构建 Web 发布未完成；核对 {prefix.name}.*.json 和回退镜像") from exc
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -275,10 +345,15 @@ def main(argv=None):
             command.add_argument("--expect-text", action="append", default=[])
         if action == "deploy":
             command.add_argument("--apply", action="store_true", help="执行发布；未指定时只输出计划")
+    prepared = sub.add_parser("deploy-prepared-web", help="发布已验证的 Web 镜像，不重新构建")
+    prepared.add_argument("--build-record", type=Path, required=True)
+    prepared.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     tool = ResearchRelease(args.root, args.env_file, args.compose_file or DEFAULT_COMPOSE)
     try:
-        if args.action == "verify":
+        if args.action == "deploy-prepared-web":
+            result = tool.deploy_prepared_web(args.build_record, apply=args.apply)
+        elif args.action == "verify":
             result = tool.verify(args.expect_text)
         elif args.action == "plan":
             result = tool.plan(args.scope)
