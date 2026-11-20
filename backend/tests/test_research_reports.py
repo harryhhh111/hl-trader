@@ -52,6 +52,32 @@ def _load_index(library: Path) -> dict:
 # --------------------------------------------------------------------------
 
 
+def test_canonical_index_migration_preserves_source_and_manifest(library: Path, tmp_path: Path) -> None:
+    legacy = library / research_reports.LEGACY_INDEX_RELATIVE_PATH
+    canonical = library / research_reports.INDEX_RELATIVE_PATH
+    canonical.parent.mkdir(parents=True)
+    legacy.rename(canonical)
+    manifest = build_snapshot(library, tmp_path / "out")
+    assert manifest["totals"] == {"companies": 5, "reports": 7}
+    assert manifest["source"]["index_path"] == research_reports.INDEX_RELATIVE_PATH
+    assert not legacy.exists()
+
+
+def test_canonical_index_wins_and_never_falls_back_on_invalid_content(library: Path, tmp_path: Path) -> None:
+    canonical = library / research_reports.INDEX_RELATIVE_PATH
+    canonical.parent.mkdir(parents=True)
+    document = _load_index(library)
+    document["reports"][0]["title"] = "Canonical title"
+    canonical.write_text(json.dumps(document), encoding="utf-8")
+    manifest = build_snapshot(library, tmp_path / "out")
+    assert manifest["reports"]["msft-main"]["title"] == "Canonical title"
+    pointer = (tmp_path / "out/current.json").read_bytes()
+    canonical.write_text("{broken", encoding="utf-8")
+    with pytest.raises(ResearchIndexError):
+        build_snapshot(library, tmp_path / "out")
+    assert (tmp_path / "out/current.json").read_bytes() == pointer
+
+
 def test_index_contract_rejects_broken_documents(library: Path) -> None:
     document = _load_index(library)
     document["schema_version"] = 2

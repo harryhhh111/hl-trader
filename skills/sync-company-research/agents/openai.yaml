@@ -1,0 +1,4 @@
+interface:
+  display_name: "同步公司研究页面"
+  short_description: "拉取研究库最新分支，校验 HTML 并发布公司研究页面的展示快照"
+  default_prompt: "使用 $sync-company-research 拉取研究库最新分支并更新线上 /research 页面。"

@@ -1,6 +1,6 @@
 # 公司研究页面：核验与发布
 
-重复操作统一使用 `deploy/research_release.py`，不再为每轮修改生成 `/tmp` 发布脚本。仅依赖 Python 3 标准库及现有 Docker Compose。命令可从任意目录调用；默认项目根目录由脚本位置确定。
+应用核验与部署使用 `deploy/research_release.py`，研究内容同步使用 `deploy/sync_research_reports.py`，不再为每轮修改生成 `/tmp` 发布脚本。命令可从任意目录调用；默认项目根目录由脚本位置确定。依赖见对应流程。
 
 ## 查看计划和只读核验
 
@@ -36,6 +36,35 @@ python3 deploy/research_release.py verify --expect-text '新页面阅读'
 流程使用锁避免本工具并发发布，检查运行配置和挂载、保留旧镜像标签、构建指定服务，通过 `up --no-deps` 切换并复验。Web 发布额外核对新旧交易 CLI 一致，并在切换前只读确认没有运行中的执行请求。它不执行迁移、密钥初始化、订单或 Git 推送，也不负责生成或切换研究快照。
 
 每次发布使用时间、提交和随机后缀生成独立记录与回退标签，私有记录存入 `.runtime/deployments/`，包含配置指纹而非配置原文。失败会留下 `.failed.json`，不会自动回退；构建失败时可能尚未切换，切换后失败时应检查实际容器状态。按记录中的镜像标签恢复需要部署授权，Web 回退同样需核对运行中的执行请求。
+
+## 同步研究库与线上内容
+
+研究库更新不会自动改变网页：线上读取独立快照。只更新报告与列表时，使用 `deploy/sync_research_reports.py`，无需构建应用镜像或重启 Web、gateway、worker。
+
+```sh
+# 只读检查来源分支、上游、线上挂载及当前快照，不 fetch
+make research-sync-plan
+
+# 用户明确要求同步/更新线上研究页面后执行
+make research-sync
+
+# 自定义来源；默认 ~/projects/stock-research
+python3 deploy/sync_research_reports.py --source /absolute/stock-research sync --apply
+```
+
+`sync` 未加 `--apply` 也只显示计划。脚本依赖 Python 3 标准库、Git 和现有 Docker Compose；快照构建使用正在运行的 Web 镜像中的 Python 依赖与当前工作区的消费端代码，不执行研究库脚本，不安装宿主依赖。可从任意工作目录执行，默认项目根目录由脚本位置定位。
+
+同步固定使用来源仓库**当前分支的跟踪上游**，先 fetch，再只允许 fast-forward；不自动选另一分支。未提交修改（含未跟踪文件）、本地领先、分支分叉、脱离分支或没有上游时停止，不 stash/reset 或推送。来源首选 `研究流程/index/html-index.json`，仅在新路径不存在时兼容旧 `研究流程/索引/html-index.json`；新路径无效时不退回旧索引。
+
+工具从运行中 Web 的只读 bind mount 找到真实快照根目录，沿用发布锁，先验证旧线上内容，然后在快照根目录内自动清理的暂存目录构建候选（本机位于 `.runtime/research-reports/`，保证与目标处于同一文件系统）。发布前检查展示文件及原件哈希、来源提交未变化、应展示的公司 HTML 没有被异常排除，拒绝空快照；demo、归档和非公司报告正常排除，draft 可展示。每家公司保留一个列表入口。
+
+候选目录进入原有 `snapshots/` 后，只原子替换该目录内的 `current.json`，不替换 bind mount 根目录。发布后核对现有 Web 实际读取的快照、gateway 页面/资源、鉴权及三个服务的实例/镜像/配置指纹；复验失败恢复旧指针，发现指针被其他流程修改则停止并报告，不覆盖他人的发布。保留历史快照以支持旧阅读链接，不自动清理。
+
+成功或失败记录写入 `.runtime/deployments/research-sync-*.json`，不含环境变量原文或凭据。Git 拉取失败可能已更新远端跟踪引用，但不切换线上内容；复验失败回退网页内容，不撤销已完成的来源仓库快进。验证范围同上文：不冒充公网登录浏览器或研究内容验收。
+
+对应 skill 源码为 [sync-company-research](../../skills/sync-company-research/SKILL.md)，安装到 `${CODEX_HOME:-$HOME/.codex}/skills/sync-company-research` 后可调用：`$sync-company-research 更新线上研究页面`。它自动执行一次同步流程，不创建后台轮询或定时任务。
+
+2026-11-20 首次同步与重复同步均成功：来源 `main` / `origin/main`，提交 `79466e96da7bd416df15c6199b6400fc3a73e23f`，快照 `s7658fcec893ae6e0a4ff5f57acdc32f0`，7 家公司、21 份 HTML。服务实例/镜像/配置及交易 CLI 哈希保持一致，21 个展示文件哈希、页面与资源、匿名接口 401 核验通过；研究库工作区保持干净。证据为 `.runtime/deployments/research-sync-20261120T053317Z-f9f17542.json` 与 `research-sync-20261120T053337Z-37fd673f.json`。公网命令行请求被 Cloudflare challenge 拦截（403），未完成公网登录后浏览器验收。发布工具 24 项与研究后端 37 项测试通过。
 
 ## 临时文件与提交
 

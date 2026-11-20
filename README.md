@@ -232,7 +232,9 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 
 ### 公司研究 HTML 报告
 
-网站主导航的「公司研究」是登录后的内部阅读入口，只展示研究库唯一索引 `研究流程/索引/html-index.json` 已登记的公司 HTML 报告。纳入条件同时满足：`entity_id` 属于 `company:`、`report_type` 为 `company_research`/`topic`/`update`、`status` 为 `draft` 或 `ready`，且登记入口是真实可读取的 HTML 普通文件。`demo`、`archived`、非公司主题、只有 Markdown 的公司都不出现；只有专题或局部更新的公司同样出现，不要求先有主报告。
+网站主导航的「公司研究」是登录后的内部阅读入口，只展示研究库唯一索引 `研究流程/index/html-index.json` 已登记的公司 HTML 报告（新路径不存在时兼容旧 `研究流程/索引/html-index.json`）。纳入条件同时满足：`entity_id` 属于 `company:`、`report_type` 为 `company_research`/`topic`/`update`、`status` 为 `draft` 或 `ready`，且登记入口是真实可读取的 HTML 普通文件。`demo`、`archived`、非公司主题、只有 Markdown 的公司都不出现；只有专题或局部更新的公司同样出现，不要求先有主报告。
+
+研究库更新后，用 `$sync-company-research 更新线上研究页面` 或经授权运行 `make research-sync`，自动快进拉取当前上游、校验并切换展示快照，无需重启服务。只读查看用 `make research-sync-plan`；skill 源码和安装位置见[同步流程](docs/deployment/RESEARCH_RELEASE_WORKFLOW.md#同步研究库与线上内容)。
 
 公司按 `entity_id` 合并，列表每家公司仅一行、一个阅读入口，优先进入主报告；没有主报告时进入已排序的专题或更新。同公司的其他报告在阅读页内切换，列表不展开报告标题、数量或别名。搜索专题标题只筛选公司，不改变该公司的主入口。`status` 与 `content_status` 分开展示：草稿可阅读，`partial` 显示「有研究缺口」，`unreviewed` 显示「尚未核验」。公司名称、别名和证券来自同一源快照中的 `research.yaml`（可选身份信息）；缺失时保留报告，展示名称回退为已登记报告标题，不根据目录名伪造证券代码。
 

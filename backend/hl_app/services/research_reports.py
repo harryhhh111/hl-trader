@@ -1,8 +1,8 @@
 """Immutable display snapshots of company research HTML reports.
 
 The only source of truth is the research library index
-``研究流程/索引/html-index.json``. This module owns the consumer side contract:
-validate the index, select the company reports this application is allowed to
+``研究流程/index/html-index.json`` (with a legacy path fallback). This module
+owns the consumer side contract: validate the index, select the reports allowed to
 show, verify every registered path and display resource, and copy the accepted
 files into a content addressed snapshot.
 
@@ -48,7 +48,8 @@ class ResearchSnapshotUnavailable(ResearchSnapshotError):
     """The snapshot exists but the service user cannot read it."""
 
 
-INDEX_RELATIVE_PATH = "研究流程/索引/html-index.json"
+INDEX_RELATIVE_PATH = "研究流程/index/html-index.json"
+LEGACY_INDEX_RELATIVE_PATH = "研究流程/索引/html-index.json"
 SNAPSHOT_SCHEMA_VERSION = 2
 SOURCE_INDEX_SCHEMA_VERSION = 1
 
@@ -277,7 +278,12 @@ def _parse_report_entry(raw: Any, position: int) -> ReportEntry:
 
 def load_index(source_root: Path) -> SourceIndex:
     """Read and validate the research library index. Never executes source code."""
-    index_path = source_root / INDEX_RELATIVE_PATH
+    relative_path = INDEX_RELATIVE_PATH
+    # A malformed or inaccessible canonical index must fail closed, never
+    # silently publish stale data from the legacy location.
+    if not (source_root / relative_path).exists() and not (source_root / relative_path).is_symlink():
+        relative_path = LEGACY_INDEX_RELATIVE_PATH
+    index_path = source_root / relative_path
     if not index_path.is_file():
         raise ResearchIndexError(f"研究索引不存在：{INDEX_RELATIVE_PATH}")
     size = index_path.stat().st_size
@@ -328,7 +334,7 @@ def load_index(source_root: Path) -> SourceIndex:
         schema_version=SOURCE_INDEX_SCHEMA_VERSION,
         entries=entries,
         redirects=tuple(parsed_redirects),
-        index_path=INDEX_RELATIVE_PATH,
+        index_path=relative_path,
         index_sha256=_sha256_bytes(raw),
     )
 
@@ -1354,8 +1360,8 @@ def build_snapshot(source_root: Path, output_root: Path) -> dict[str, Any]:
 
     index = load_index(source_root)
     tracker = _SourceTracker(source_root)
-    tracker.read(INDEX_RELATIVE_PATH, MAX_INDEX_BYTES)
-    if tracker.stamps[INDEX_RELATIVE_PATH].sha256 != index.index_sha256:
+    tracker.read(index.index_path, MAX_INDEX_BYTES)
+    if tracker.stamps[index.index_path].sha256 != index.index_sha256:
         raise ResearchIndexError("研究索引在读取期间发生变化")
     candidates, excluded = _select_candidates(index)
     identities, identity_diagnostics, identity_files = load_identities(
@@ -1466,7 +1472,7 @@ def build_snapshot(source_root: Path, output_root: Path) -> dict[str, Any]:
             "media_type": media_type_for(served_relative),
         }
 
-    index_stamp = tracker.stamps.get(INDEX_RELATIVE_PATH)
+    index_stamp = tracker.stamps.get(index.index_path)
     if index_stamp is None:
         raise ResearchReportError("研究索引未被读取")
     if index_stamp.sha256 != index.index_sha256:
