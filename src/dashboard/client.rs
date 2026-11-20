@@ -15,7 +15,7 @@ use hypersdk::hypercore::types::{
 };
 use hypersdk::hypercore::{Chain, HttpClient};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use super::config::Network;
 
@@ -60,19 +60,23 @@ fn classify(e: &anyhow::Error) -> String {
     }
 }
 
-/// 账户抽象模式查询的固定 /info DTO（SDK 的 abstraction_mode 是封闭枚举，
-/// 会丢掉未知值且不带 dex，不符合"未知值保留+诊断"的契约要求）。
-/// 注意：官方端点 type 为 "userAbstraction" 且不接受 dex 字段（实测带 dex 返回 422）。
+/// 用户级固定 /info 请求；这些端点不接受 dex 字段。
 #[derive(Serialize)]
-struct AbstractionRequest {
+struct UserRequest {
     #[serde(rename = "type")]
     request_type: &'static str,
     user: Address,
 }
 
+#[derive(Deserialize)]
+struct PortfolioWindow {
+    #[serde(rename = "accountValueHistory")]
+    account_value_history: Vec<(u64, String)>,
+}
+
 pub struct InfoClient {
     client: HttpClient,
-    /// 仅用于 abstraction 固定 DTO；只 POST {base}/info。
+    /// 仅用于 abstraction / portfolio 固定 DTO；只 POST {base}/info。
     raw: reqwest::Client,
     base: &'static str,
 }
@@ -112,7 +116,7 @@ impl InfoClient {
         }
     }
 
-    /// 测试入口：仅 raw 客户端（abstraction 固定 DTO）指向本地 mock。
+    /// 测试入口：仅 raw 客户端（abstraction / portfolio 固定 DTO）指向本地 mock。
     #[cfg(test)]
     pub fn with_raw_base(raw_base: &str, network: Network) -> Self {
         let chain = match network {
@@ -194,19 +198,12 @@ impl InfoClient {
             .collect())
     }
 
-    /// 账户抽象模式原始枚举字符串（unifiedAccount|portfolioMargin|disabled|default|
-    /// dexAbstraction 或未来未知值都原样返回，由调用方决定是否诊断）。
-    pub async fn abstraction_mode(
+    async fn user_info<T: DeserializeOwned>(
         &self,
+        request_type: &'static str,
         user: Address,
-        dex: Option<&str>,
-    ) -> Result<String, String> {
-        // 官方 userAbstraction 端点是用户级查询，不接受 dex（实测 422）；忽略该参数。
-        let _ = dex;
-        let req = AbstractionRequest {
-            request_type: "userAbstraction",
-            user,
-        };
+    ) -> Result<T, String> {
+        let req = UserRequest { request_type, user };
         let response = self
             .raw
             .post(format!("{}/info", self.base))
@@ -217,11 +214,35 @@ impl InfoClient {
         if !response.status().is_success() {
             return Err(format!("HTTP 层错误 {}", response.status().as_u16()));
         }
-        // 官方响应为纯字符串，如 "unifiedAccount"；任何 JSON 字符串都原样保留。
         response
-            .json::<String>()
+            .json::<T>()
             .await
             .map_err(|_| "响应格式无法识别".to_string())
+    }
+
+    /// SDK 的封闭枚举会丢弃未知值，因此保留官方原始字符串。
+    pub async fn abstraction_mode(
+        &self,
+        user: Address,
+        dex: Option<&str>,
+    ) -> Result<String, String> {
+        let _ = dex;
+        self.user_info("userAbstraction", user).await
+    }
+
+    /// 统一账户和组合保证金账户的最新账户级权益。
+    pub async fn account_equity(&self, user: Address) -> Result<Decimal, String> {
+        let windows: Vec<(String, PortfolioWindow)> = self.user_info("portfolio", user).await?;
+        let (_, day) = windows
+            .into_iter()
+            .find(|(name, _)| name == "day")
+            .ok_or_else(|| "响应格式无法识别".to_string())?;
+        let (_, equity) = day
+            .account_value_history
+            .into_iter()
+            .max_by_key(|(at, _)| *at)
+            .ok_or_else(|| "响应格式无法识别".to_string())?;
+        equity.parse().map_err(|_| "响应格式无法识别".to_string())
     }
 }
 
@@ -326,6 +347,27 @@ mod tests {
         let mode = client.abstraction_mode(user2, None).await.unwrap();
         assert_eq!(mode, "default");
         assert_eq!(no_dex.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn account_equity_reads_latest_day_value_without_dex() {
+        let server = MockServer::start_async().await;
+        let m = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""type":"portfolio""#)
+                .body_includes(USER)
+                .body_excludes(r#""dex""#);
+            then.status(200).body(
+                r#"[["day",{"accountValueHistory":[[1,"10.0"],[2,"68.154581"]]}],["perpDay",{"accountValueHistory":[[2,"0.0"]]}]]"#,
+            );
+        });
+        let client = InfoClient::with_raw_base(&server.base_url(), Network::Mainnet);
+        assert_eq!(
+            client.account_equity(user()).await.unwrap(),
+            Decimal::new(68_154_581, 6)
+        );
+        assert_eq!(m.calls(), 1);
     }
 
     #[tokio::test]

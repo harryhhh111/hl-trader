@@ -3,6 +3,12 @@ import type { HlPositionState, HlV2Position } from '@/lib/types/hyperliquid';
 export const dash = (value: string | null | undefined) =>
   value == null || value === '' ? '—' : value;
 
+export const significantDigits = (value: string | null | undefined, digits = 5) => {
+  if (value == null || value === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toPrecision(digits) : '—';
+};
+
 export const signed = (value: string | null | undefined) =>
   value == null || value === '' ? '—' : `${Number(value) >= 0 ? '+' : ''}${value}`;
 
@@ -64,8 +70,9 @@ export const dexLabel = (dex: string) => (dex === '' ? '原生' : dex);
 
 /** 后端诊断文案 → 白话。按顺序匹配，未命中则原文展示。 */
 const DIAGNOSTIC_RULES: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
-  [/^账户模式 "(.*)" 的权益口径不适用单 DEX 余额（仅展示经验证的持仓）$/,
-    () => '该账户为统一账户模式，总权益横跨多个交易区，无法按单一交易区展示；此处仅列出已核验的持仓明细'],
+  [/^账户模式 "(.*)" 的权益口径未验证，权益不可用（仅展示经验证的持仓）$/,
+    () => '该账户模式的权益口径尚未验证；此处仅列出已核验的持仓明细'],
+  [/^账户总权益查询失败（(.*)）$/, (m) => `查询账户总权益失败：${m[1]}`],
   [/^未配置解锁锚点$/, () => '尚未配置代币解锁的信息来源，无法展示解锁计划'],
   [/^解锁锚点全部无效：日期无法解析、来源链接非 HTTP\(S\) 或核实日期晚于当天$/,
     () => '解锁信息来源配置有误：日期无法识别、链接不是 http(s)、或核实日期晚于今天'],

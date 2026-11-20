@@ -14,7 +14,7 @@ import { TradeHistory } from '@/components/hyperliquid/trade-history';
 import { PageHeader } from '@/components/layout/page-header';
 import {
   accountShort, dash, dexLabel, formatTime, NETWORK_LABEL, pctFromFraction, pctFromNumber,
-  plainDiagnostic, positionLegsLabel, signed,
+  plainDiagnostic, positionLegsLabel, signed, significantDigits,
 } from '@/components/hyperliquid/format';
 import { snapshotIdentityMatches } from '@/components/hyperliquid/identity';
 import {
@@ -75,8 +75,8 @@ function RatioChart({ points, coins }: { points: HlRatioPoint[] | null; coins: [
           p.date,
           `${coins[0]} 收盘：${p.first_close ?? '—'}`,
           `${coins[1]} 收盘：${p.second_close ?? '—'}`,
-          `比价：${p.ratio ?? '—'}`,
-          `30MA：${p.ma30 ?? '—'}`,
+          `比价：${significantDigits(p.ratio)}`,
+          `30MA：${significantDigits(p.ma30)}`,
         ].join('<br/>');
       },
     },
@@ -132,12 +132,13 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
             <span>两腿盈亏合计 <span className="font-mono">{signed(positions.unrealized_pnl)}</span></span>
             <span>名义比 <span className="font-mono">{dash(positions.notional_ratio)}</span></span>
             <span>差异 <span className="font-mono">{pctFromNumber(positions.ratio_drift_pct)}</span></span>
-            <span>最新收盘比价 <span className="font-mono">{dash(ratio.latest_close)}</span></span>
-            <span>30MA <span className="font-mono">{dash(ratio.ma30)}</span>
+            <span>最新收盘比价 <span className="font-mono">{significantDigits(ratio.latest_close)}</span></span>
+            <span>30MA <span className="font-mono">{significantDigits(ratio.ma30)}</span>
               {ratio.vs_ma30_pct != null && <span>（{signed(ratio.vs_ma30_pct)}%）</span>}
             </span>
             <span>权益 <span className="font-mono">{dash(account.equity)}</span>
               {account.equity_scope === 'perp_dex' && <span className="text-xs text-muted-foreground">（{dexLabel(descriptor.dex)}永续市场权益）</span>}
+              {account.equity_scope === 'account' && <span className="text-xs text-muted-foreground">（账户总权益）</span>}
             </span>
             <span>挂单数 <span className="font-mono">{positions.open_orders ?? '—'}</span></span>
           </div>

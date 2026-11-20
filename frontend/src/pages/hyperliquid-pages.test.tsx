@@ -145,6 +145,19 @@ test('总览和详情方向摘要显示具体两腿多空', () => {
   qc.clear();
 });
 
+test('详情页显示账户总权益，收盘比价与 30MA 保留五位有效数字', () => {
+  const value = snapshot(hypeFixture);
+  const qc = seed(value);
+  const detail = renderDetail(qc, value.pair.id);
+  assert.match(detail, /1234\.56789/);
+  assert.match(detail, /账户总权益/);
+  assert.match(detail, /0\.00095686/);
+  assert.match(detail, /0\.0010577/);
+  assert.doesNotMatch(detail, /0\.000956857497/);
+  assert.match(renderOverview(qc), /0\.00095686/);
+  qc.clear();
+});
+
 test('仓位模块位于风控和比价图之前', () => {
   const value = snapshot(hypeFixture);
   const qc = seed(value);

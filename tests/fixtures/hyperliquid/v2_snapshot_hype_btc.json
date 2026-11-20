@@ -16,7 +16,7 @@
     },
     "blocks": {
         "account": {
-            "status": "partial",
+            "status": "ok",
             "queried_at": "2026-10-18T18:27:31Z",
             "source_queries": {
                 "mode": {
@@ -26,14 +26,16 @@
                 "balances": {
                     "status": "ok",
                     "queried_at": "2026-10-18T18:27:31Z"
+                },
+                "portfolio": {
+                    "status": "ok",
+                    "queried_at": "2026-10-18T18:27:31Z"
                 }
             },
             "account_mode": "unifiedAccount",
-            "equity": null,
-            "equity_scope": "unavailable",
-            "diagnostics": [
-                "账户模式 \"unifiedAccount\" 的权益口径不适用单 DEX 余额（仅展示经验证的持仓）"
-            ]
+            "equity": "1234.56789",
+            "equity_scope": "account",
+            "diagnostics": []
         },
         "positions": {
             "status": "ok",

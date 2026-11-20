@@ -1,14 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { plainDiagnostic, positionLegsLabel, slippageLabel } from './format.ts';
+import { plainDiagnostic, positionLegsLabel, significantDigits, slippageLabel } from './format.ts';
 import type { HlV2Position } from '../../lib/types/hyperliquid';
 
-test('统一账户权益口径 → 白话', () => {
+test('账户权益异常 → 白话', () => {
   assert.equal(
-    plainDiagnostic('账户模式 "unifiedAccount" 的权益口径不适用单 DEX 余额（仅展示经验证的持仓）'),
-    '该账户为统一账户模式，总权益横跨多个交易区，无法按单一交易区展示；此处仅列出已核验的持仓明细',
+    plainDiagnostic('账户模式 "weirdFutureMode" 的权益口径未验证，权益不可用（仅展示经验证的持仓）'),
+    '该账户模式的权益口径尚未验证；此处仅列出已核验的持仓明细',
   );
+  assert.equal(
+    plainDiagnostic('账户总权益查询失败（HTTP 层错误 500）'),
+    '查询账户总权益失败：HTTP 层错误 500',
+  );
+});
+
+test('比价数值保留五位有效数字并处理缺省值', () => {
+  assert.equal(significantDigits('0.0009568574971455230752231403'), '0.00095686');
+  assert.equal(significantDigits('0.0010576729475514441760005183'), '0.0010577');
+  assert.equal(significantDigits('123.456'), '123.46');
+  assert.equal(significantDigits('8'), '8.0000');
+  assert.equal(significantDigits(null), '—');
+  assert.equal(significantDigits('not-a-number'), '—');
 });
 
 test('未配置解锁锚点 → 白话', () => {

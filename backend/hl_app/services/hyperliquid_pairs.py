@@ -316,7 +316,7 @@ def _run_dashboard(collect_argv: list[str]) -> dict:
 # ── 契约校验 ──────────────────────────────────────────────
 
 BLOCK_SOURCE_KEYS = {
-    "account": ("mode", "balances"),
+    "account": ("mode", "balances", "portfolio"),
     "positions": ("positions", "orders", "market"),
     "funding": ("positions", "market", "user_funding"),
     "ratio": ("market", "candles_first", "candles_second"),

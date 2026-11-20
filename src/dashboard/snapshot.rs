@@ -86,8 +86,6 @@ impl SourceQuery {
 #[serde(rename_all = "snake_case")]
 pub enum EquityScope {
     PerpDex,
-    /// 账户级权益口径（本轮不自行计算；保留枚举以匹配契约类型）。
-    #[allow(dead_code)]
     Account,
     Unavailable,
 }
@@ -96,6 +94,7 @@ pub enum EquityScope {
 pub struct AccountSources {
     mode: SourceQuery,
     balances: SourceQuery,
+    portfolio: SourceQuery,
 }
 
 #[derive(Debug, Serialize)]
@@ -597,7 +596,14 @@ pub async fn collect_pair(
         ]
     });
 
-    let account_block = build_account_block(&mode, &balances);
+    let portfolio = match (account, mode.value.as_deref()) {
+        (Some(user), Some("unifiedAccount") | Some("portfolioMargin")) => {
+            timed(client.account_equity(user), |e: &String| e.clone()).await
+        }
+        _ => Timed::not_attempted(),
+    };
+
+    let account_block = build_account_block(&mode, &balances, &portfolio);
     let positions_block = build_positions_block(descriptor, &balances, &orders, &market);
     let funding_block = build_funding_block(
         descriptor,
@@ -644,7 +650,11 @@ fn history_error(complete: &bool) -> Option<String> {
     }
 }
 
-fn build_account_block(mode: &Timed<String>, balances: &Timed<ClearinghouseState>) -> AccountBlock {
+fn build_account_block(
+    mode: &Timed<String>,
+    balances: &Timed<ClearinghouseState>,
+    portfolio: &Timed<Decimal>,
+) -> AccountBlock {
     let mut diagnostics = Vec::new();
     let mode_ok = mode.value.is_some();
     let balances_ok = balances.value.is_some();
@@ -663,23 +673,30 @@ fn build_account_block(mode: &Timed<String>, balances: &Timed<ClearinghouseState
     let account_mode = mode.value.clone();
     let (equity, equity_scope) = match account_mode.as_deref() {
         None => (None, EquityScope::Unavailable),
-        Some("default") | Some("disabled") | Some("dexAbstraction") => {
-            // 标准口径：该 DEX marginSummary.accountValue 可信。
-            match &balances.value {
-                Some(state) => (
-                    Some(state.margin_summary.account_value.to_string()),
-                    EquityScope::PerpDex,
-                ),
-                None => {
-                    diagnostics
-                        .push("权益不可用（余额查询失败），持仓等独立数据不受影响".to_string());
-                    (None, EquityScope::Unavailable)
-                }
+        Some("default") | Some("disabled") | Some("dexAbstraction") => match &balances.value {
+            Some(state) => (
+                Some(state.margin_summary.account_value.to_string()),
+                EquityScope::PerpDex,
+            ),
+            None => {
+                diagnostics.push("权益不可用（余额查询失败），持仓等独立数据不受影响".to_string());
+                (None, EquityScope::Unavailable)
             }
-        }
+        },
+        Some("unifiedAccount") | Some("portfolioMargin") => match portfolio.value {
+            Some(value) => (Some(value.to_string()), EquityScope::Account),
+            None => {
+                let reason = portfolio
+                    .reason
+                    .as_deref()
+                    .unwrap_or("响应缺少最新账户权益");
+                diagnostics.push(format!("账户总权益查询失败（{reason}）"));
+                (None, EquityScope::Unavailable)
+            }
+        },
         Some(other) => {
             diagnostics.push(format!(
-                "账户模式 \"{other}\" 的权益口径不适用单 DEX 余额（仅展示经验证的持仓）"
+                "账户模式 \"{other}\" 的权益口径未验证，权益不可用（仅展示经验证的持仓）"
             ));
             (None, EquityScope::Unavailable)
         }
@@ -692,6 +709,7 @@ fn build_account_block(mode: &Timed<String>, balances: &Timed<ClearinghouseState
         source_queries: AccountSources {
             mode: mode.query(),
             balances: balances.query(),
+            portfolio: portfolio.query(),
         },
         account_mode,
         equity,
@@ -1471,6 +1489,16 @@ mod tests {
         });
     }
 
+    fn mock_portfolio(server: &MockServer, body: String) {
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""type":"portfolio""#)
+                .body_excludes(r#""dex""#);
+            then.status(200).body(body);
+        });
+    }
+
     fn mock_funding(server: &MockServer, body: String) {
         server.mock(|when, then| {
             when.method(httpmock::Method::POST)
@@ -1561,6 +1589,8 @@ mod tests {
         assert_eq!(a["status"], "ok");
         assert_eq!(a["source_queries"]["mode"]["status"], "ok");
         assert_eq!(a["source_queries"]["balances"]["status"], "ok");
+        assert_eq!(a["source_queries"]["portfolio"]["status"], "unavailable");
+        assert!(a["source_queries"]["portfolio"]["queried_at"].is_null());
         assert_eq!(a["account_mode"], "default");
         assert_eq!(a["equity"], "1000");
         assert_eq!(a["equity_scope"], "perp_dex");
@@ -1645,29 +1675,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unified_and_portfolio_margin_null_equity_but_positions_survive() {
+    async fn unified_and_portfolio_margin_use_account_equity() {
         for mode in [r#""unifiedAccount""#, r#""portfolioMargin""#] {
             let now_ms = realtime_ms();
             let server = MockServer::start_async().await;
             mock_essentials(&server, META_XYZ, ACCOUNT_TWO_LEGS);
             mock_mode(&server, mode);
+            mock_portfolio(
+                &server,
+                json!([["day", {"accountValueHistory": [[now_ms, "1234.56789"]]}]]).to_string(),
+            );
             mock_funding(&server, "[]".to_string());
             mock_candles(&server, now_ms, 32);
             let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
             let v = to_json(&collect(&server, &p, now_ms).await);
             let a = &v["blocks"]["account"];
             assert_eq!(a["account_mode"], mode.trim_matches('"'));
-            assert!(a["equity"].is_null(), "{mode} 权益必须 null");
-            assert_eq!(a["equity_scope"], "unavailable");
-            assert_eq!(a["status"], "partial");
-            assert!(
-                a["diagnostics"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|d| d.as_str().unwrap().contains("口径不适用"))
-            );
-            // 独立数据照常。
+            assert_eq!(a["equity"], "1234.56789");
+            assert_eq!(a["equity_scope"], "account");
+            assert_eq!(a["source_queries"]["portfolio"]["status"], "ok");
+            assert_eq!(a["status"], "ok");
+            assert!(a["diagnostics"].as_array().unwrap().is_empty());
             assert_eq!(
                 v["blocks"]["positions"]["items"].as_array().unwrap().len(),
                 2
@@ -1675,6 +1703,34 @@ mod tests {
             assert_eq!(v["blocks"]["positions"]["position_state"], "opposite");
             assert_eq!(v["blocks"]["funding"]["hourly_rates"]["xyz:NBIS"], "0.0001");
         }
+    }
+
+    #[tokio::test]
+    async fn unified_account_equity_failure_preserves_positions() {
+        let now_ms = realtime_ms();
+        let server = MockServer::start_async().await;
+        mock_essentials(&server, META_XYZ, ACCOUNT_TWO_LEGS);
+        mock_mode(&server, r#""unifiedAccount""#);
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/info")
+                .body_includes(r#""type":"portfolio""#);
+            then.status(500).body("boom");
+        });
+        mock_funding(&server, "[]".to_string());
+        mock_candles(&server, now_ms, 32);
+        let p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        let v = to_json(&collect(&server, &p, now_ms).await);
+        let a = &v["blocks"]["account"];
+        assert!(a["equity"].is_null());
+        assert_eq!(a["equity_scope"], "unavailable");
+        assert_eq!(a["source_queries"]["portfolio"]["status"], "unavailable");
+        assert_eq!(a["status"], "partial");
+        assert_eq!(a["diagnostics"][0], "账户总权益查询失败（HTTP 层错误 500）");
+        assert_eq!(
+            v["blocks"]["positions"]["items"].as_array().unwrap().len(),
+            2
+        );
     }
 
     #[tokio::test]

@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  accountShort, dash, formatTime, NETWORK_LABEL, pctFromFraction, plainDiagnostic, positionLegsLabel, signed,
+  accountShort, formatTime, NETWORK_LABEL, pctFromFraction, plainDiagnostic, positionLegsLabel, signed,
+  significantDigits,
 } from '@/components/hyperliquid/format';
 import { snapshotIdentityMatches } from '@/components/hyperliquid/identity';
 import {
@@ -85,7 +86,7 @@ function PairCard({ descriptor, revision }: { descriptor: HlPairDescriptor; revi
               <span>两腿盈亏合计 <span className="font-mono">{signed(positions?.unrealized_pnl)}</span></span>
               <span>{descriptor.coins[0]} 名义 <span className="font-mono">{legNotional(descriptor.coins[0])}</span></span>
               <span>{descriptor.coins[1]} 名义 <span className="font-mono">{legNotional(descriptor.coins[1])}</span></span>
-              <span>比价 <span className="font-mono">{dash(ratio?.latest_close)}</span>
+              <span>比价 <span className="font-mono">{significantDigits(ratio?.latest_close)}</span>
                 {ratio?.vs_ma30_pct != null && (
                   <span className={Number(ratio.vs_ma30_pct) >= 0 ? 'text-emerald-600' : 'text-rose-600'}> {signed(ratio.vs_ma30_pct)}%</span>
                 )}
