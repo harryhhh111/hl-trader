@@ -1,6 +1,6 @@
 # 2026-11-20 源码收尾与运行基线
 
-本轮将此前已部分上线的工作树改动纳入本地版本管理，并纠正当前功能状态。没有推送、重启服务、执行生产迁移或真实交易。公司研究按用户本次授权单独更新内容快照，不构建或切换线上应用。
+源码收尾阶段将此前已部分上线的工作树改动纳入本地版本管理，并纠正当前功能状态；该阶段没有推送、重启服务、执行生产迁移或真实交易，公司研究仅更新内容快照。随后用户另行授权部署账户权益修复，实际发布与只读复验见[部署记录](ACCOUNT_EQUITY_2026_11_20.md)。
 
 ## 源码归档范围
 
@@ -20,11 +20,11 @@
 - 二者的 `014_watchlist_ownership_quotes.sql`、`services/watchlist.py`、`services/news_sync.py` 和 `services/hyperliquid_margin.py` 均与本地源码一致。模块存在不替代真实采集、同步或交易验收。
 - 资讯同步已于 11 月 13 日按 `bed940f` 部署，migration `013` 已应用；当次 bootstrap 为 `not_started`、事件数为 0。后续记录和模块核对未发现启用证据，同步仍关闭。旧文档“未部署”改为“已部署但未启用/联调”。
 
-发现一项需要单独上线的版本缺口：11 月 19 日按 `e6de848` 构建的交易 CLI 没有包含当时未提交的权益修复；运行后端已经要求 `account.source_queries` 恰好包含 `mode/balances/portfolio`，CLI 仍只返回前两项。因此账户权益区块会被严格校验降级，其他持仓区块独立处理。本轮只读核对运行二进制包含旧诊断、不包含新 portfolio 诊断，与构建记录和源码对照相符。
+部署前发现一项版本缺口：11 月 19 日按 `e6de848` 构建的交易 CLI 没有包含当时未提交的权益修复；后端已经要求 `account.source_queries` 恰好包含 `mode/balances/portfolio`，旧 CLI 仍只返回前两项，账户权益区块会被严格校验降级，其他持仓区块独立处理。当时只读核对运行二进制包含旧诊断、不包含新 portfolio 诊断，与构建记录和源码对照相符。该缺口现已按后续明确授权修复并完成真实公开账户只读复验。
 
 不能将 11 月 13 日的权益部署记录继续当作当前 CLI 已具备该能力的证据。后续镜像必须同时包含本轮 Rust 修复和对应后端合同；源码归档与构建不构成部署授权。现有研究发布工具要求 CLI 哈希保持一致，不能用它绕过执行器升级的专门核对。
 
-## 当前运行服务
+## 部署前运行基线
 
 | 服务 | 本轮核对的镜像 | 范围 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 | gateway | `sha256:f6ef5bed141b450691c6959ef3e02621fb733207481c573d8a1e24f3c6cbdebe` | 托管钱包调仓弹窗 |
 | worker | `sha256:5f148193557064ae7655542a690c141251910f3a982ad9626c19e0b71d6c21b6` | 独立行情开启，公告和 stock_data 同步关闭 |
 
-交易 CLI SHA-256 为 `69d05b02eea5343b67e09b811e118e150d8a7dad7628951006e8c07849f0752e`。这些是本轮运行对照，后续发布须重新核对；不能由 Git HEAD 推断运行镜像。
+上述部署前 CLI SHA-256 为 `69d05b02eea5343b67e09b811e118e150d8a7dad7628951006e8c07849f0752e`。后续权益修复将 Web 更新为 `sha256:87595dae9fef150b5387ffa8bffb830a8bb82d4f81757bb1a144578e3d9010b7`，CLI 更新为 `cba86b2d40f47527511d3106cd7927a64fb3c8b073da98fff8f693c0b6e7d2ad`，gateway 和 worker 镜像保留。不能由 Git HEAD 推断运行镜像。
 
 ## 当前源码验证
 
@@ -50,7 +50,7 @@
 
 汇总为 `.runtime/verification/closeout-20261120.json`，完整日志为 `closeout-20261120.log`，修正后的 Rust 日志为同目录 `closeout-20261120-rust.log`。测试使用当前源码、fixture 和独立临时数据库，没有访问真实账户或发送订单。依赖弃用、SSR 渲染、测试缓存权限及前端大 chunk 警告保留于日志，不作为真实功能验收。
 
-## 已准备的权益修复候选镜像（未部署）
+## 权益修复镜像的构建与核验
 
 复用 `deploy/build_adjustment_release.py`，从提交 `7b18dae` 导出 Rust 和固定三个调仓模块，以当前 Web 的已验证镜像标签为基础构建。构建记录为 `.runtime/deployments/equity-closeout-20261120-build.json`，日志为 `.runtime/verification/equity-closeout-20261120-build.log`。
 
@@ -60,6 +60,8 @@
 - 重新只读核验线上服务与 27 份研究 HTML，服务实例、镜像、环境与挂载指纹仍与研究发布后相同。
 
 镜像核验证据为 `.runtime/deployments/equity-closeout-20261120-verified.json`。构建工具同时生成 gateway 候选，但本修复只需更新 Web 执行器，再重新加载现有 gateway 的 nginx 配置以解析新 Web 地址；worker 和 gateway 镜像继续沿用。切换前须获明确授权，保留回退镜像，确认没有执行中的调仓请求，并在切换后复验配置、快照和账户块合同。不能使用要求 CLI 哈希不变的普通研究发布模式执行此次升级。
+
+该候选已于 2026-11-20 08:10 UTC 经用户另行授权部署，仅更新 Web，并重新加载现有 gateway 配置；两个 pair 的权益及持仓区块只读复验均为 `ok`。部署证据为 `.runtime/deployments/equity-closeout-20261120T080959Z-c01dcd3d.deployed.json`，账户复验为同目录 `equity-closeout-20261120-live-accounts.json`。
 
 ## 研究内容更新
 
