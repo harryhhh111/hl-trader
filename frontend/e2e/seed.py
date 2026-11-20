@@ -196,7 +196,8 @@ table{border-collapse:collapse}th,td{border:1px solid #bbb;padding:.3rem .6rem}<
 (library / "ORCL" / "reports" / "topic.html").write_text(
     """<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>甲骨文：云合同结构</title></head>
-<body><h1 id="contracts">甲骨文：云合同结构</h1><p>剩余履约义务与合同期限结构。</p></body></html>
+<body><h1 id="contracts">甲骨文：云合同结构</h1><p>剩余履约义务与合同期限结构。</p>
+<a href="main.html#thesis">返回报告首页</a></body></html>
 """,
     encoding="utf-8",
 )

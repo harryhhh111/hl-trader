@@ -14,14 +14,15 @@ from fastapi.responses import Response
 
 from ..auth import require_session
 from ..services import research_reports
-from ..services.research_display import with_document_policy
+from ..services.research_display import standalone_report_links, with_document_policy
 
 router = APIRouter(dependencies=[Depends(require_session)])
 logger = logging.getLogger(__name__)
 
 # Static reading mode: no script, no network, no form, no plugin, opaque origin.
 # The frame may only open a link in the top level window after the reader
-# clicked it, so a link to another report reaches the outer application.
+# clicked it. Reader frames navigate the outer application; standalone HTML
+# responses navigate directly between authenticated HTML documents.
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; "
     "style-src 'unsafe-inline'; "
@@ -96,6 +97,13 @@ def report_content(snapshot_id: str, registered_path: str, request: Request) -> 
         payload, media_type = research_reports.snapshot_content_bytes(
             Path(configured), snapshot_id, registered_path
         )
+        if media_type.startswith('text/html'):
+            loaded = research_reports.load_snapshot(Path(configured), snapshot_id)
+            payload = standalone_report_links(
+                payload.decode('utf-8'), snapshot_id,
+                {report_id: research_reports.report_content_url(snapshot_id, report.entry_path)
+                 for report_id, report in loaded.manifest.reports.items()},
+            ).encode('utf-8')
     except research_reports.ResearchSnapshotUnavailable as exc:
         logger.warning('Research content unavailable: %s', exc)
         raise HTTPException(503, "研究快照不可读取，请检查服务读取权限") from exc

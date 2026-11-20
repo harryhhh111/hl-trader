@@ -1,0 +1,9 @@
+# Overlay only the reviewed navigation modules on the running Web image.
+ARG BASE_WEB_IMAGE
+FROM ${BASE_WEB_IMAGE}
+ARG CODE_COMMIT
+LABEL io.hl-trader.research-navigation.commit=${CODE_COMMIT}
+COPY backend/hl_app/routes/research.py /usr/local/lib/python3.12/site-packages/hl_app/routes/research.py
+COPY backend/hl_app/services/research_display.py /usr/local/lib/python3.12/site-packages/hl_app/services/research_display.py
+COPY backend/hl_app/routes/research.py /app/backend/hl_app/routes/research.py
+COPY backend/hl_app/services/research_display.py /app/backend/hl_app/services/research_display.py

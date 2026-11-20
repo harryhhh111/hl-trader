@@ -161,6 +161,77 @@ def test_report_fragment_query_and_legacy_paths_use_snapshot_bound_reader(librar
     assert response.json()['data']['snapshot_id'] == first['snapshot_id']
 
 
+def test_standalone_navigation_stays_in_html_across_modules_and_retained_snapshots(library, tmp_path):
+    from html.parser import HTMLParser
+
+    class Anchors(HTMLParser):
+        def __init__(self, document):
+            super().__init__()
+            self.links = []
+            self.feed(document)
+
+        def handle_starttag(self, tag, attrs):
+            if tag == 'a':
+                self.links.append(dict(attrs))
+
+    replace_main(library, '<a href="old.html?source=review#cash">专题</a><a href="#summary">摘要</a>')
+    module = library / 'MSFT/传统软件与现金流.html'
+    module.write_text('<h1 id="cash">原始专题</h1><a href="MSFT.html#summary">首页</a>')
+    document = _load_index(library)
+    document['redirects'] = [{'from': 'MSFT/old.html', 'report_id': 'msft-cashflow'}]
+    _write_index(library, document)
+    output = tmp_path / 'output'
+    first = reports.build_snapshot(library, output)
+    snapshot_id = first['snapshot_id']
+    main_url = reports.report_content_url(snapshot_id, 'MSFT/MSFT.html')
+    module_url = reports.report_content_url(snapshot_id, 'MSFT/传统软件与现金流.html')
+    raw_path = output / 'snapshots' / snapshot_id / 'content/MSFT/MSFT.html'
+    stored = raw_path.read_bytes()
+
+    # A later publication must not move an already-open document to new content.
+    module.write_text('<h1 id="cash">最新专题</h1>')
+    reports.build_snapshot(library, output)
+    client = _client(output)
+    response = client.get(main_url)
+    assert response.status_code == 200
+    anchors = Anchors(response.text).links
+    assert anchors[0]['href'] == module_url + '#cash'
+    assert anchors[0]['target'] == '_self'
+    assert anchors[1]['href'] == '#summary'
+    topic = client.get(anchors[0]['href'])
+    assert topic.status_code == 200
+    assert '原始专题' in topic.text and '最新专题' not in topic.text
+    home = Anchors(topic.text).links[0]
+    assert home['href'] == main_url + '#summary'
+    assert home['target'] == '_self'
+    assert client.get(home['href']).status_code == 200
+    assert client.get(reports.report_content_url(snapshot_id, 'MSFT/old.html')).text == topic.text
+    assert raw_path.read_bytes() == stored
+    # JSON reader mode continues to navigate its containing application.
+    reader = client.get('/api/v1/research/reports/msft-main', params={'snapshot': snapshot_id})
+    embedded_links = Anchors(reader.json()['data']['document_html']).links
+    assert embedded_links[0]['href'] == f'/research/reports/msft-cashflow?snapshot={snapshot_id}#cash'
+    assert embedded_links[0]['target'] == '_top'
+
+
+def test_standalone_rewrite_only_changes_registered_anchor_tags():
+    from hl_app.services.research_display import standalone_report_links
+
+    url = '/research/reports/known?snapshot=s12345678'
+    document = ('<!doctype html><!-- <a href="' + url + '"> -->\n'
+                '<style>.x::before{content:\'<a href="' + url + '">\'}</style>\n'
+                '<svg viewBox="0 0 1 1"></svg><p>中文\u2028 &amp; &#123; &bare</p>\n'
+                '<A class="card"\n HREF=\'' + url + '#%E7%8E%B0%E9%87%91\' TARGET="_top">模块</A>\n'
+                '<a href="#local">本页</a><a href="https://example.invalid' + url + '">外部</a>'
+                '<a href="/research/reports/missing?snapshot=s12345678">未知</a>')
+    rewritten = standalone_report_links(document, 's12345678', {'known': '/api/v1/research/content/s12345678/中文/main.html'})
+    expected = document.replace(
+        'HREF=\'' + url + '#%E7%8E%B0%E9%87%91\' TARGET="_top"',
+        'HREF="/api/v1/research/content/s12345678/中文/main.html#%E7%8E%B0%E9%87%91" TARGET="_self"')
+    assert rewritten == expected
+    assert standalone_report_links(rewritten, 's12345678', {'known': 'unused'}) == rewritten
+
+
 def test_original_only_changes_and_rebuilds_are_consistent(library, tmp_path):
     replace_main(library, '<p>same</p><script>old()</script>')
     output = tmp_path / 'output'
@@ -173,7 +244,7 @@ def test_original_only_changes_and_rebuilds_are_consistent(library, tmp_path):
 
 
 def test_duplicate_json_keys_are_not_silently_overwritten(library, tmp_path):
-    path = library / reports.INDEX_RELATIVE_PATH
+    path = library / reports.LEGACY_INDEX_RELATIVE_PATH
     path.write_text(path.read_text().replace('"schema_version": 1', '"schema_version": 2, "schema_version": 1'))
     with pytest.raises(reports.ResearchIndexError, match='重复 JSON'):
         reports.build_snapshot(library, tmp_path / 'output')

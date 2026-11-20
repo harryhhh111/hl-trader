@@ -23,6 +23,63 @@ DISPLAY_REVISION = 1
 MAX_EMBEDDED_BYTES = 64 * 1024 * 1024
 
 
+def standalone_report_links(document: str, snapshot_id: str, report_urls: dict[str, str]) -> str:
+    """Keep navigation in standalone HTML, including retained snapshot documents.
+
+    Only generated links to reports in this snapshot are changed. Splice anchor
+    start tags into the original text so styles, SVG, entities and prose retain
+    their exact bytes. The immutable display copy itself remains unchanged.
+    """
+    destinations = {
+        '/research/reports/' + quote(report_id, safe='') + '?snapshot=' + quote(snapshot_id, safe=''): url
+        for report_id, url in report_urls.items()
+    }
+
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.offsets = [0]
+            # HTMLParser counts only LF as a new line, unlike splitlines().
+            for line in document.split('\n'):
+                self.offsets.append(self.offsets[-1] + len(line) + 1)
+            self.edits: list[tuple[int, int, str]] = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag != 'a':
+                return
+            href = dict(attrs).get('href') or ''
+            base, separator, fragment = href.partition('#')
+            destination = destinations.get(base)
+            if destination is None:
+                return
+            destination += separator + fragment
+            raw = self.get_starttag_text()
+
+            def rewrite(match):
+                name = match[2].lower()
+                if name not in {'href', 'target'}:
+                    return match[0]
+                value = destination if name == 'href' else '_self'
+                return match[1] + match[2] + '="' + html.escape(value, quote=True) + '"'
+
+            replacement = ATTR.sub(rewrite, raw)
+            line, column = self.getpos()
+            start = self.offsets[line - 1] + column
+            self.edits.append((start, start + len(raw), replacement))
+
+        handle_startendtag = handle_starttag
+
+    parser = Links()
+    parser.feed(document)
+    parser.close()
+    chunks, cursor = [], 0
+    for start, end, replacement in parser.edits:
+        chunks.extend((document[cursor:start], replacement))
+        cursor = end
+    chunks.append(document[cursor:])
+    return ''.join(chunks)
+
+
 def with_document_policy(document: str, policy: str) -> str:
     """Carry static restrictions into a browser-local document, without changing its doctype."""
     class HeadLocation(HTMLParser):

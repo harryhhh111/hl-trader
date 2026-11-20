@@ -125,6 +125,23 @@ test("新页面阅读直接展示完整报告，禁止嵌入策略不影响独�
   await expect(reader.getByText('57,419', { exact: true })).toBeVisible();
   await reader.getByText('展开查看口径', { exact: true }).click();
   await expect(reader.getByText('口径为美元百万。', { exact: true })).toBeVisible();
+  const mainUrl = new URL(reader.url());
+  const pagesBeforeModule = context.pages().length;
+  await reader.getByRole('link', { name: '同公司专题', exact: true }).click();
+  const topicUrl = new URL(mainUrl);
+  topicUrl.pathname = mainUrl.pathname.replace(/main\.html$/, 'topic.html');
+  topicUrl.hash = 'contracts';
+  await expect(reader).toHaveURL(topicUrl.href);
+  await expect(reader.getByRole('heading', { name: '甲骨文：云合同结构', exact: true })).toBeVisible();
+  await expect(reader.locator('iframe')).toHaveCount(0);
+  expect(context.pages()).toHaveLength(pagesBeforeModule);
+  const topicReload = await reader.reload();
+  expect(topicReload.status()).toBe(200);
+  await reader.getByRole('link', { name: '返回报告首页', exact: true }).click();
+  mainUrl.hash = 'thesis';
+  await expect(reader).toHaveURL(mainUrl.href);
+  await expect(reader.getByRole('heading', { name: '核心判断', exact: true })).toBeVisible();
+  await expect(reader.locator('iframe')).toHaveCount(0);
   const anonymous = await context.browser().newContext();
   try {
     expect((await anonymous.request.get(reader.url())).status()).toBe(401);
