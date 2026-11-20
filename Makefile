@@ -27,7 +27,9 @@ test-image:
 	docker image inspect $(WEB_TEST_IMAGE) >/dev/null 2>&1 || docker build --target web -t $(WEB_TEST_IMAGE) .
 
 test-rust:
-	$(RUST_RUN) sh -c 'rustup component add rustfmt clippy && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test'
+	# Shared target caches may contain this crate from an isolated release tree.
+	# Rebuild the dev crate while preserving dependency and release caches.
+	$(RUST_RUN) sh -c 'rustup component add rustfmt clippy && cargo clean --package hl-trader --profile dev && cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test'
 
 test-backend: test-image
 	docker run --rm -v $(CURDIR):/work -w /work -e PYTHONPATH=/work/backend $(WEB_TEST_IMAGE) python -m pytest backend/tests -m 'not db and not live' -q

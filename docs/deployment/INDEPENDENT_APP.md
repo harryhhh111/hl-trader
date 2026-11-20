@@ -125,6 +125,8 @@ Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`、`HL_APP_REBALANCE_MONI
 
 仓库根目录可执行 `make test-fast`、`make test-db`、`make test-e2e` 或完整的 `make verify`。E2E 使用 `deploy/docker/Dockerfile.e2e` 固定 UTF-8、非 root 用户、PostgreSQL 和 Chromium；`HL_APP_E2E_PYTHON` 可覆盖 Python 路径。Rust 测试使用持久 `hl-trader-rustup` 卷，生产 Dockerfile 的 Cargo 构建使用 BuildKit 缓存。首次构建仍需下载依赖；缓存、测试镜像或临时数据库不得包含生产凭据。
 
+`make test-rust` 先执行 `cargo clean --package hl-trader --profile dev`，仅重建本 crate 的开发产物，保留依赖和 release 缓存。隔离发布构建与工作区曾共用 target，旧 crate 产物可能被复用；不能仅凭历史测试数量或旧二进制退出码认定当前源码已验证。
+
 ```sh
 cargo fmt --check
 cargo test --offline
@@ -144,7 +146,7 @@ E2E 使用真实 Chromium 和本地临时 PostgreSQL，桌面 1440×900、移动
 
 ## 5. 原 full 迁移的预演与停写测量
 
-第 5–7 节只适用于[原 full 数据迁移合同](../migration/DATA_CONTRACT.md)，保留用于正式迁移和回退工具的演练。[资讯同步新合同](../STOCK_DATA_NEWS_SYNC_CONTRACT.md)是另一条尚未实现的“空资讯范围 bootstrap + 增量”链路，不要求这里的 full 包或 full lineage，不能把两者串成同一套启动步骤。
+第 5–7 节只适用于[原 full 数据迁移合同](../migration/DATA_CONTRACT.md)，保留用于正式迁移和回退工具的演练。[资讯同步新合同](../STOCK_DATA_NEWS_SYNC_CONTRACT.md)是另一条已实现、已部署但尚未启用或真实联调的“空资讯范围 bootstrap + 增量”链路，不要求这里的 full 包或 full lineage，不能把两者串成同一套启动步骤。
 
 若选择原 full 迁移，先在独立预演库完成 full 导入、基线、激活、业务变化、回退导出和源侧恢复。正式源 bundle 和源侧恢复适配由 stock_data agent 负责，未验收前不能切换。
 
