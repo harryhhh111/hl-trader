@@ -7,6 +7,7 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 ## 文档
 
 - 当前功能、未完成项与验收记录适用范围：[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+- 公司研究页面、研究库同步 skill 与发布命令：[RESEARCH_RELEASE_WORKFLOW.md](docs/deployment/RESEARCH_RELEASE_WORKFLOW.md)。
 - 独立 Web 应用原迁移执行方案（A–H 已交付，保留历史范围）：[INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md](docs/INDEPENDENT_APP_MIGRATION_EXECUTION_PLAN.md)。
 - v2 看板历史验收基线与当前复验待办：[HYPERLIQUID_V2_ACCEPTANCE.md](docs/HYPERLIQUID_V2_ACCEPTANCE.md)。
 - 第三方依赖与许可：[THIRD_PARTY.md](THIRD_PARTY.md)。
@@ -21,7 +22,7 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 
 ## 独立 Web 应用
 
-原迁移 A–H 已交付，后续增加了托管调仓、账号注册、实时盘口/滑点、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。阈值再平衡人工版已部署；stock_data 资讯同步消费端已在当前代码实现，但尚未部署或真实联调。全自动止盈止损尚未实现。实际部署版本另行核对。
+原迁移 A–H 已交付，后续增加了托管调仓、账号注册、盘口深度/滑点保护、Pair 风险提醒、杠杆调整及 Cross/3x 增仓检查。阈值再平衡人工版、关注股管理与独立行情更新、公司研究阅读均已部署；调仓弹窗仅使用托管 API Wallet。stock_data 资讯同步消费端已部署但未启用，真实联调与生产 bootstrap 尚未验收。全自动止盈止损尚未实现。版本与证据范围见当前状态页。
 
 需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
 
@@ -225,6 +226,10 @@ JSON pair 配置字段（CLI 与独立 Web 使用同一份受控文件，Web 由
 `account_address` 在首次添加时保留为“默认账户”。公开账户地址与托管 API Wallet 分表保存；托管私钥仅以密文入库。
 
 ### 关注股资讯同步
+
+关注股页面支持新增、重复添加校验、停用和恢复。`account` 模式按登录账号隔离关注关系、分组、理由和研究链接；token 与 Cloudflare Access 继续沿用单用户边界。证券、日线和公告共享，同一证券被多个账号关注时只采集一次。移除仅停用当前账号的关注，不删除历史数据。
+
+新增或恢复只写入待采集状态，Web 请求不访问外网。worker 优先处理待采集证券，先补近 90 天，有效收盘不足 20 条时扩展至 365 天，随后按 `HL_APP_COLLECTION_INTERVAL_SECONDS` 周期更新；页面展示最近尝试、成功时间、最新交易日、入库数量和安全错误摘要。行情可由 `HL_APP_QUOTES_ENABLED` 独立启用，留空时沿用 `HL_APP_COLLECTORS_ENABLED`；2026-11-18 已启用行情并完成首轮真实回补，公告与资讯同步仍关闭，见[启用记录](docs/deployment/WATCHLIST_QUOTES_2026_11_18.md)。
 
 关注股和每日资讯页面只读取本仓库 PostgreSQL。`stock_data` 同步消费端使用专用 HTTPS 只读接口，按不透明 cursor 分页，将事件、收据和 cursor 在同一事务提交；严格 DTO、来源映射、原始 revision、关联和中文增强字段均保留。同步来源固定为 `ingest_mode=stock_data`，不会进入本地直接采集队列，也不会自动新增或启用关注证券。
 

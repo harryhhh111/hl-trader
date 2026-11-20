@@ -1,6 +1,6 @@
 # stock_data → hl-trader 资讯增量同步接口开发合同 v1
 
-状态（2026-11-12 更新）：目标消费端已在当前代码实现，包含 migration `013`、严格 DTO、HTTPS client、页事务、bootstrap/status/activate 和普通 worker；尚未部署或真实联调。目标测试 fixture 按本合同在本仓库独立维护，并非对源侧最新文件的复制或验证。
+状态（2026-11-20 核对）：目标消费端已实现，包含 migration `013`、严格 DTO、HTTPS client、页事务、bootstrap/status/activate 和普通 worker；2026-11-13 已按 `bed940f` 部署消费端和迁移，同步仍关闭，生产 bootstrap、激活和真实联调尚未验收。运行模块与记录范围见[交付基线](deployment/RELEASE_BASELINE_2026_11_20.md)。目标测试 fixture 按本合同在本仓库独立维护，并非对源侧最新文件的复制或验证。
 
 状态核对：源侧提交、远端版本和字段缺口属于合同编写时的观察，本次仍未复查 stock_data 仓库或运行服务，不能当作源侧当前发布结论。[当前项目状态](PROJECT_STATUS.md)另列其他已实现功能。
 

@@ -82,7 +82,11 @@ python3 deploy/sync_research_reports.py --source /absolute/stock-research sync -
 
 对应 skill 源码为 [sync-company-research](../../skills/sync-company-research/SKILL.md)，安装到 `${CODEX_HOME:-$HOME/.codex}/skills/sync-company-research` 后可调用：`$sync-company-research 更新线上研究页面`。它自动执行一次同步流程，不创建后台轮询或定时任务。
 
+当前环境已安装该 skill；用户直接提出“拉取最新研究并更新公司研究页面”也可触发。它只更新已登记的公司 HTML 内容，不部署应用代码。
+
 2026-11-20 首次同步与重复同步均成功：来源 `main` / `origin/main`，提交 `79466e96da7bd416df15c6199b6400fc3a73e23f`，快照 `s7658fcec893ae6e0a4ff5f57acdc32f0`，7 家公司、21 份 HTML。服务实例/镜像/配置及交易 CLI 哈希保持一致，21 个展示文件哈希、页面与资源、匿名接口 401 核验通过；研究库工作区保持干净。证据为 `.runtime/deployments/research-sync-20261120T053317Z-f9f17542.json` 与 `research-sync-20261120T053337Z-37fd673f.json`。公网命令行请求被 Cloudflare challenge 拦截（403），未完成公网登录后浏览器验收。发布工具 24 项与研究后端 37 项测试通过。
+
+2026-11-20 07:23 UTC 再次按用户要求同步：研究库 `main` 从 `79466e96` 快进到 `6132e968fe4c067382813f350fe114e091c0e0f0`，发布快照 `s1cee4a3ba5dcbc6b149e3a12798a688a`，7 家公司、27 份 HTML，新增 QXO 的六个独立研究模块。展示文件与保留原件哈希、内网 gateway、健康和匿名鉴权检查通过，三个服务的实例/镜像/配置与交易 CLI 保持一致，研究库工作区干净。demo 和纯行业条目继续按范围排除；没有重启服务或执行公网登录浏览器验收。证据为 `.runtime/deployments/research-sync-20261120T072336Z-97ca7fdf.json`。
 
 ## 临时文件与提交
 
