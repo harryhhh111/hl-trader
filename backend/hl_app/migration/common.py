@@ -20,7 +20,7 @@ ENTITIES = (
 )
 NATURAL_KEYS = {
     "securities": ("market", "stock_code"),
-    "watchlist_items": ("security_id",),
+    "watchlist_items": ("security_id", "owner_account_id"),
     "daily_quotes": ("market", "stock_code", "trade_date"),
     "watchlist_announcement_source": ("market", "source_kind", "issuer_identifier", "entry_url"),
     "watchlist_announcement": ("source_id", "source_record_id", "revision"),
@@ -68,7 +68,7 @@ def digest(value) -> str:
 
 
 def natural_key(entity: str, row: dict) -> dict:
-    return {key: normalize(row[key]) for key in NATURAL_KEYS[entity]}
+    return {key: normalize(row.get(key)) for key in NATURAL_KEYS[entity]}
 
 
 def rows_by_key(entity: str, rows: list[dict]) -> dict:

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg2
 import pytest
 
-from hl_app.collectors.quotes import collect_security, enabled_securities
+from hl_app.collectors.quotes import collect_security, due_securities, enabled_securities
 from hl_app.db import migrate
-from hl_app.services.watchlist import WatchlistError, list_items, quote_batch, update_item
+from hl_app.services.watchlist import (
+    WatchlistError,
+    add_item,
+    list_items,
+    quote_batch,
+    set_item_enabled,
+    update_item,
+)
 
 from .conftest import PostgresNamespace
 
@@ -114,6 +121,85 @@ def test_known_quote_is_not_overwritten_by_missing_value(seeded) -> None:
         with conn.cursor() as cursor:
             cursor.execute("SELECT close FROM daily_quotes WHERE market = 'US' AND stock_code = '000001' AND trade_date = '2026-10-02'")
             assert cursor.fetchone()[0] == 102
+
+
+def test_account_scoped_add_disable_restore_and_shared_collection(seeded) -> None:
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
+            cursor.execute(
+                "INSERT INTO auth_accounts (email, password_hash) VALUES "
+                "('one@example.com', 'fixture'), ('two@example.com', 'fixture')"
+            )
+    values = {
+        "market": "US", "stock_code": "aapl", "stock_name": "Apple",
+        "quote_source": "tencent", "quote_symbol": "AAPL.OQ",
+        "exchange_suffix": ".OQ", "cik": "320193", "industry": None,
+        "group_name": "科技", "note": "长期跟踪", "research_url": "",
+        "sort_order": 1,
+    }
+    first = add_item(seeded.runtime_url, values, 1)
+    assert first["action"] == "created"
+    with pytest.raises(WatchlistError, match="已在关注列表") as duplicate:
+        add_item(seeded.runtime_url, values, 1)
+    assert duplicate.value.status_code == 409
+    second = add_item(seeded.runtime_url, values, 2)
+    assert second["security_id"] == first["security_id"] and second["id"] != first["id"]
+    assert [row["stock_code"] for row in list_items(seeded.runtime_url, 1)] == ["AAPL"]
+    with pytest.raises(WatchlistError, match="不存在"):
+        update_item(seeded.runtime_url, first["id"], values, 2)
+    assert quote_batch(seeded.runtime_url, "US", ["000001"], owner_account_id=1)["quotes"][0]["status"] == "missing"
+    targets = [row for row in enabled_securities(seeded.runtime_url) if row["stock_code"] == "AAPL"]
+    assert len(targets) == 1
+    set_item_enabled(seeded.runtime_url, first["id"], False, 1)
+    disabled = list_items(seeded.runtime_url, 1, include_disabled=True)
+    assert disabled[0]["enabled"] is False
+    assert list_items(seeded.runtime_url, 2)[0]["enabled"] is True
+    assert len([row for row in enabled_securities(seeded.runtime_url) if row["stock_code"] == "AAPL"]) == 1
+    set_item_enabled(seeded.runtime_url, first["id"], True, 1)
+    restored = list_items(seeded.runtime_url, 1)[0]
+    assert restored["enabled"] is True and restored["quote_status"] == "pending"
+    assert restored["quote_next_attempt_at"] is not None
+
+
+def test_collection_records_success_and_failure_state(seeded) -> None:
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE operation_control SET mode = 'active'")
+    security = next(row for row in enabled_securities(seeded.runtime_url) if row["market"] == "CN_A")
+    now = datetime(2026, 10, 3, 0, tzinfo=timezone.utc)
+
+    def fail(_url, _params):
+        raise RuntimeError("secret upstream detail")
+
+    with pytest.raises(RuntimeError):
+        collect_security(seeded.runtime_url, security, now=now, http_get=fail)
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT status, last_error, last_attempt_at FROM quote_collection_state WHERE security_id = %s",
+                (security["id"],),
+            )
+            status, error, attempted = cursor.fetchone()
+            assert status == "failed" and error == "采集异常（RuntimeError）"
+            assert "secret" not in error and attempted is not None
+    assert security["id"] not in {row["id"] for row in due_securities(seeded.runtime_url, now)}
+    assert security["id"] in {
+        row["id"] for row in due_securities(seeded.runtime_url, now + timedelta(hours=1, seconds=1))
+    }
+
+    def fixture_get(_url, _params):
+        return {"data": {"cn": {"day": [["2026-10-02", "10", "10.2", "10.3", "9.9", "100"]]}}}
+
+    assert collect_security(seeded.runtime_url, security, now=now, http_get=fixture_get) == 1
+    with psycopg2.connect(seeded.migration_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT status, latest_trade_date, last_record_count, last_success_at, last_error "
+                "FROM quote_collection_state WHERE security_id = %s",
+                (security["id"],),
+            )
+            assert cursor.fetchone() == ("success", date(2026, 10, 2), 1, now, None)
 
 
 def test_invalid_security_identity_is_rejected_by_db(seeded) -> None:

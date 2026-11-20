@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from ..db import connect
 from ..config import ConfigError
 from ..migration.service import MaintenanceMode, assert_active
-from ..collectors.quotes import collect_security, enabled_securities
+from ..collectors.quotes import (
+    collect_security,
+    due_securities,
+    enabled_securities,
+    quote_error_summary,
+)
 from ..collectors.sources import collect_source, ensure_sec_sources, registered_sources
 from ..collectors.sec_client import SECClient
 from ..services import ai
@@ -125,7 +130,13 @@ def run_once(url: str, kind: str, http_get=None) -> dict:
         lifecycle.close()
 
 
-def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) -> dict:
+def _run_once(
+    url: str,
+    kind: str,
+    lifecycle: WorkerLifecycle,
+    http_get=None,
+    due_only: bool = False,
+) -> dict:
     if kind in {"pair_risk", "pair_rebalance"}:
         if os.environ.get(_monitor_env(kind), "false").lower() != "true":
             return {"status": "disabled", "kind": kind}
@@ -151,9 +162,23 @@ def _run_once(url: str, kind: str, lifecycle: WorkerLifecycle, http_get=None) ->
     assert_active(url)
     if kind == "quotes":
         results = []
-        for security in enabled_securities(url):
+        interval = max(60, int(os.environ.get("HL_APP_COLLECTION_INTERVAL_SECONDS", "3600")))
+        targets = due_securities(url) if due_only else enabled_securities(url)
+        kwargs = {} if http_get is None else {"http_get": http_get}
+        for security in targets:
             lifecycle.ensure_healthy()
-            results.append({security["stock_code"]: collect_security(url, security)})
+            try:
+                count = collect_security(url, security, retry_seconds=interval, **kwargs)
+                results.append({"stock_code": security["stock_code"], "status": "success", "records": count})
+            except MaintenanceMode:
+                raise
+            except Exception as exc:
+                logger.warning("行情采集失败 %s：%s", security["stock_code"], quote_error_summary(exc))
+                results.append({
+                    "stock_code": security["stock_code"],
+                    "status": "failed",
+                    "error": quote_error_summary(exc),
+                })
         return {"kind": kind, "results": results}
     if kind != "announcements":
         raise ValueError("kind 只支持 quotes、announcements、pair_risk、pair_rebalance 或 news_sync")
@@ -181,6 +206,7 @@ def run_scheduler(url: str) -> None:
     lifecycle = WorkerLifecycle(url)
     lifecycle.acquire()
     next_collection = 0.0
+    next_quotes = 0.0
     next_risk = 0.0
     next_rebalance = 0.0
     next_news_sync = 0.0
@@ -189,8 +215,10 @@ def run_scheduler(url: str) -> None:
             lifecycle.ensure_healthy()
             now = time.monotonic()
             try:
+                if now >= next_quotes:
+                    _run_once(url, "quotes", lifecycle, due_only=True)
+                    next_quotes = time.monotonic() + min(30, max(5, interval))
                 if now >= next_collection:
-                    _run_once(url, "quotes", lifecycle)
                     if os.environ.get("HL_APP_NEWS_SYNC_ENABLED", "false").lower() != "true":
                         _run_once(url, "announcements", lifecycle)
                     next_collection = now + interval
@@ -209,6 +237,7 @@ def run_scheduler(url: str) -> None:
                     next_news_sync = time.monotonic() + news_sync_interval
             except MaintenanceMode:
                 next_collection = now + interval
+                next_quotes = now + interval
                 next_risk = now + risk_interval
                 next_rebalance = now + rebalance_interval
                 next_news_sync = now + news_sync_interval

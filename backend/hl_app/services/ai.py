@@ -93,7 +93,13 @@ def _extract_json(text: str) -> dict:
     return result
 
 
-def suggest_fields(url: str, market: str, code: str, name: str) -> dict:
+def suggest_fields(
+    url: str,
+    market: str,
+    code: str,
+    name: str,
+    owner_account_id: int | None = None,
+) -> dict:
     code = canonical_code(market, code)
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
@@ -101,8 +107,9 @@ def suggest_fields(url: str, market: str, code: str, name: str) -> dict:
                 """
                 SELECT s.industry FROM securities s JOIN watchlist_items w ON w.security_id = s.id
                 WHERE s.market = %s AND s.stock_code = %s AND w.enabled = true
+                  AND w.owner_account_id IS NOT DISTINCT FROM %s
                 """,
-                (market, code),
+                (market, code, owner_account_id),
             )
             row = cursor.fetchone()
             if row is None:

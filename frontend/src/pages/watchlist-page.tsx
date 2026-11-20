@@ -1,16 +1,29 @@
 import { useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Pencil, RefreshCw, Star } from "lucide-react";
+import { ExternalLink, Pencil, Plus, RefreshCw, RotateCcw, Star, Trash2 } from "lucide-react";
 import { ApiError, watchlistApi } from "@/lib/api/client";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Market } from "@/lib/types/common";
-import type { AnnouncementItem, AnnouncementSummary, WatchItem, WatchQuote } from "@/lib/types/watchlist";
+import type { AnnouncementItem, AnnouncementSummary, NewWatchItem, WatchItem, WatchQuote } from "@/lib/types/watchlist";
 
 const markets: Market[] = ["US", "CN_HK", "CN_A"];
 const currency = { US: "USD", CN_HK: "HKD", CN_A: "CNY" };
 const errorText = (error: unknown) => error instanceof ApiError ? error.detail : error instanceof Error ? error.message : "请求失败";
+const emptyDraft = (): NewWatchItem => ({
+  market: "US", stock_code: "", stock_name: "", quote_source: "tencent",
+  quote_symbol: "", exchange_suffix: ".OQ", cik: null, industry: null,
+  group_name: "", note: "", research_url: "", sort_order: 0,
+});
+const utcTime = (value: string | null) => value ? `${value.slice(0, 16).replace("T", " ")} UTC` : "—";
+
+function QuoteState({ item }: { item: WatchItem }) {
+  if (item.quote_status === "failed") return <span className="text-xs text-destructive">采集失败：{item.quote_error || "未知错误"}</span>;
+  if (item.quote_status === "collecting") return <span className="text-xs text-muted-foreground">行情更新中</span>;
+  if (item.quote_status === "success") return <span className="text-xs text-muted-foreground">本次入库 {item.quote_record_count ?? 0} 条 · {utcTime(item.quote_last_success_at)}</span>;
+  return <span className="text-xs text-amber-600">待首次采集，等待 worker 执行</span>;
+}
 
 function announcementTime(item: AnnouncementItem) {
   if (item.time_unknown) return `时间未知，发现于 ${item.first_observed_at ?? "—"}`;
@@ -48,9 +61,15 @@ export function WatchlistPage() {
   const [group, setGroup] = useState("");
   const [sort, setSort] = useState("default");
   const [editor, setEditor] = useState<WatchItem | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState<NewWatchItem>(emptyDraft);
+  const [removeTarget, setRemoveTarget] = useState<WatchItem | null>(null);
   const [actionError, setActionError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const itemsQuery = useQuery({ queryKey: ["watchlist"], queryFn: watchlistApi.list, retry: false });
   const items = itemsQuery.data ?? [];
+  const activeItems = items.filter((item) => item.enabled !== false);
+  const disabledItems = items.filter((item) => item.enabled === false);
   const [annItem, setAnnItem] = useState<WatchItem | null>(null);
   const [annSource, setAnnSource] = useState("all");
   const [annOffset, setAnnOffset] = useState(0);
@@ -64,7 +83,7 @@ export function WatchlistPage() {
     retry: 1,
   });
   const quoteQueries = useQueries({ queries: markets.map((current) => {
-    const codes = items.filter((item) => item.market === current).map((item) => item.stock_code).sort();
+    const codes = activeItems.filter((item) => item.market === current).map((item) => item.stock_code).sort();
     return {
       queryKey: ["watchlist-quotes", current, codes],
       queryFn: () => watchlistApi.quotes(current, codes),
@@ -76,8 +95,8 @@ export function WatchlistPage() {
   }) });
   const quotes = new Map<string, WatchQuote>();
   quoteQueries.forEach((query, index) => query.data?.quotes.forEach((quote) => quotes.set(`${markets[index]}:${quote.stock_code}`, quote)));
-  const groups = [...new Set(items.map((item) => item.group_name).filter(Boolean))].sort();
-  const visible = items.filter((item) => (market === "all" || item.market === market) && (!group || item.group_name === group));
+  const groups = [...new Set(activeItems.map((item) => item.group_name).filter(Boolean))].sort();
+  const visible = activeItems.filter((item) => (market === "all" || item.market === market) && (!group || item.group_name === group));
   if (sort !== "default") visible.sort((a, b) => {
     const av = quotes.get(`${a.market}:${a.stock_code}`)?.change_pct;
     const bv = quotes.get(`${b.market}:${b.stock_code}`)?.change_pct;
@@ -102,17 +121,79 @@ export function WatchlistPage() {
     },
     onError: (error) => setActionError(errorText(error)),
   });
+  const add = useMutation({
+    mutationFn: () => watchlistApi.add({
+      ...draft,
+      cik: draft.market === "US" && draft.cik?.trim() ? draft.cik.trim() : null,
+      industry: draft.industry?.trim() || null,
+    }),
+    onSuccess: (result) => {
+      setAdding(false);
+      setDraft(emptyDraft());
+      setActionError("");
+      setActionMessage(result.action === "restored" ? "已恢复关注，等待 worker 回补行情。" : "已添加关注，等待 worker 回补历史日线。");
+      void qc.invalidateQueries({ queryKey: ["watchlist"] });
+    },
+    onError: (error) => setActionError(errorText(error)),
+  });
+  const remove = useMutation({
+    mutationFn: (itemId: number) => watchlistApi.disable(itemId),
+    onSuccess: () => {
+      setRemoveTarget(null);
+      setActionError("");
+      setActionMessage("已停用关注，共享历史行情仍保留。");
+      void qc.invalidateQueries({ queryKey: ["watchlist"] });
+    },
+    onError: (error) => setActionError(errorText(error)),
+  });
+  const restore = useMutation({
+    mutationFn: (itemId: number) => watchlistApi.restore(itemId),
+    onSuccess: () => {
+      setActionError("");
+      setActionMessage("已恢复关注，等待 worker 更新行情。");
+      void qc.invalidateQueries({ queryKey: ["watchlist"] });
+    },
+    onError: (error) => setActionError(errorText(error)),
+  });
 
   return (
     <div className="space-y-6">
       <PageHeader icon={Star} title="关注股" description="关注公司、研究理由与未复权日线行情。">
+        <Button onClick={() => { setAdding((value) => !value); setActionError(""); }}><Plus className="w-4 h-4 mr-2" />添加股票</Button>
         <Button variant="outline" onClick={() => {
           void qc.invalidateQueries({ queryKey: ["watchlist"] });
           void qc.invalidateQueries({ queryKey: ["watchlist-quotes"] });
         }}><RefreshCw className="w-4 h-4 mr-2" />刷新</Button>
       </PageHeader>
+      {adding && (
+        <Card><CardContent className="pt-6">
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); add.mutate(); }}>
+            <div><h2 className="font-semibold">添加关注股票</h2><p className="text-xs text-muted-foreground mt-1">证券和行情全站共享，关注理由与分组仅属于当前账号。</p></div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="text-sm">市场<select className="mt-1 w-full h-9 border rounded-md bg-background px-2" value={draft.market} onChange={(event) => {
+                const value = event.target.value as Market;
+                setDraft({ ...draft, market: value, stock_code: "", quote_symbol: "", exchange_suffix: value === "US" ? ".OQ" : null, cik: null });
+              }}>{markets.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+              <label className="text-sm">证券代码<input required className="mt-1 w-full border rounded-md bg-background p-2" maxLength={20} value={draft.stock_code} onChange={(event) => setDraft({ ...draft, stock_code: event.target.value })} placeholder={draft.market === "US" ? "AAPL" : draft.market === "CN_HK" ? "00700" : "600519"} /></label>
+              <label className="text-sm">证券名称<input required className="mt-1 w-full border rounded-md bg-background p-2" maxLength={200} value={draft.stock_name} onChange={(event) => setDraft({ ...draft, stock_name: event.target.value })} /></label>
+              {draft.market === "US" && <label className="text-sm">交易所后缀<select className="mt-1 w-full h-9 border rounded-md bg-background px-2" value={draft.exchange_suffix ?? ".OQ"} onChange={(event) => setDraft({ ...draft, exchange_suffix: event.target.value as ".OQ" | ".N" })}><option value=".OQ">.OQ（纳斯达克）</option><option value=".N">.N（纽交所）</option></select></label>}
+              <label className="text-sm">腾讯行情代码<input required className="mt-1 w-full border rounded-md bg-background p-2" maxLength={100} value={draft.quote_symbol} onChange={(event) => setDraft({ ...draft, quote_symbol: event.target.value })} placeholder={draft.market === "US" ? "AAPL.OQ" : draft.market === "CN_HK" ? "hk00700" : "sh600519"} /></label>
+              {draft.market === "US" && <label className="text-sm">CIK（可选）<input className="mt-1 w-full border rounded-md bg-background p-2" maxLength={10} inputMode="numeric" value={draft.cik ?? ""} onChange={(event) => setDraft({ ...draft, cik: event.target.value })} placeholder="0000320193" /></label>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-sm">分组<input className="mt-1 w-full border rounded-md bg-background p-2" maxLength={80} value={draft.group_name} onChange={(event) => setDraft({ ...draft, group_name: event.target.value })} /></label>
+              <label className="text-sm">研究链接<input className="mt-1 w-full border rounded-md bg-background p-2" type="url" maxLength={2000} value={draft.research_url} onChange={(event) => setDraft({ ...draft, research_url: event.target.value })} /></label>
+            </div>
+            <label className="block text-sm">关注理由<textarea className="mt-1 w-full border rounded-md bg-background p-3 min-h-20" maxLength={2000} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} /></label>
+            <p className="text-xs text-muted-foreground">保存只登记待采集任务，不会在 Web 请求中访问行情源。worker 将先补近 90 天，有效收盘不足 20 条时扩展至 365 天。</p>
+            <div className="flex gap-2"><Button type="submit" disabled={add.isPending}>{add.isPending ? "保存中…" : "保存并等待回补"}</Button><Button type="button" variant="outline" onClick={() => setAdding(false)}>取消</Button></div>
+          </form>
+        </CardContent></Card>
+      )}
+      {actionError && !editor && <p role="alert" className="text-destructive text-sm">{actionError}</p>}
+      {actionMessage && <p role="status" className="text-sm text-emerald-600">{actionMessage}</p>}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[["关注股票", items.length], ["研究分组", groups.length], ["行情口径", "日线收盘"]].map(([label, value]) => (
+        {[["关注股票", activeItems.length], ["研究分组", groups.length], ["行情口径", "日线收盘"]].map(([label, value]) => (
           <Card key={label}><CardContent className="pt-5"><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-semibold mt-1">{value}</p></CardContent></Card>
         ))}
       </div>
@@ -121,10 +202,10 @@ export function WatchlistPage() {
         <select aria-label="筛选分组" className="h-9 rounded-md border bg-background px-3 text-sm" value={group} onChange={(event) => setGroup(event.target.value)}><option value="">全部分组</option>{groups.map((item) => <option key={item}>{item}</option>)}</select>
         <select aria-label="排序" className="h-9 rounded-md border bg-background px-3 text-sm" value={sort} onChange={(event) => setSort(event.target.value)}><option value="default">登记顺序</option><option value="up">涨幅优先</option><option value="down">跌幅优先</option></select>
       </div>
-      <p className="text-xs text-muted-foreground">行情只读数据库，不触发采集；涨跌幅比较最新与前一条入库日线，缺失不跨值计算。新增和移除证券由管理员脚本维护。</p>
+      <p className="text-xs text-muted-foreground">页面行情只读数据库，不直接触发采集；新增和恢复由 worker 异步回补。移除仅停用当前账号的关注，不删除共享证券、历史行情或公告。</p>
       {itemsQuery.isPending && <p>正在读取关注列表…</p>}
       {itemsQuery.error && <div role="alert" className="text-destructive">{errorText(itemsQuery.error)}</div>}
-      {itemsQuery.isSuccess && items.length === 0 && <Card><CardContent className="py-16 text-center text-muted-foreground">暂无已启用的关注证券</CardContent></Card>}
+      {itemsQuery.isSuccess && activeItems.length === 0 && <Card><CardContent className="py-16 text-center text-muted-foreground">暂无已启用的关注证券</CardContent></Card>}
       {visible.length > 0 && (
         <div className="border rounded-lg bg-card overflow-x-auto">
           <table className="w-full text-sm">
@@ -139,15 +220,27 @@ export function WatchlistPage() {
                   <td className="p-3 font-mono whitespace-nowrap">{quote?.close?.toLocaleString("en-US", { maximumFractionDigits: 4 }) ?? "—"} <span className="text-xs">{currency[item.market]}</span></td>
                   <td className="p-3 min-w-40"><div>{quote?.change_pct == null ? "—" : `${quote.change_pct >= 0 ? "+" : ""}${quote.change_pct.toFixed(2)}%`}</div><div className="text-xs text-muted-foreground">{quote?.previous_quote_date && quote?.quote_date ? `${quote.previous_quote_date} → ${quote.quote_date}` : quote?.warning}</div></td>
                   <td className="p-3"><Sparkline quote={quote} /></td>
-                  <td className="p-3 min-w-36"><div>{quote?.quote_date || "—"}</div>{quote?.stale && <span className="text-xs text-amber-600">行情滞后</span>}</td>
+                  <td className="p-3 min-w-52"><div>{quote?.quote_date || item.quote_latest_trade_date || "—"}</div>{quote?.stale && <span className="block text-xs text-amber-600">行情滞后</span>}<QuoteState item={item} />{item.quote_last_attempt_at && <span className="block text-xs text-muted-foreground">最近尝试 {utcTime(item.quote_last_attempt_at)}</span>}</td>
                   <td className="p-3 min-w-36">{item.market !== "US" ? <span className="text-xs text-muted-foreground">该市场未接入公告源</span> : <button type="button" className="text-left" onClick={() => { setAnnItem(item); setAnnOffset(0); }}><span>近 7 日 {ann?.count ?? "—"} 条</span><span className="block text-xs text-muted-foreground">{ann?.sources.find((source) => source.state !== "ok")?.message || "查看公告"}</span></button>}</td>
                   <td className="p-3 min-w-48 max-w-72 whitespace-pre-wrap">{item.note || <span className="text-muted-foreground">未填写</span>}</td>
-                  <td className="p-3"><div className="flex gap-1">{item.research_url && <Button asChild variant="ghost" size="icon"><a href={item.research_url} target="_blank" rel="noopener noreferrer" aria-label="打开研究"><ExternalLink /></a></Button>}<Button variant="ghost" size="icon" aria-label={`编辑${item.stock_code}`} onClick={() => setEditor(item)}><Pencil /></Button></div></td>
+                  <td className="p-3"><div className="flex gap-1">{item.research_url && <Button asChild variant="ghost" size="icon"><a href={item.research_url} target="_blank" rel="noopener noreferrer" aria-label="打开研究"><ExternalLink /></a></Button>}<Button variant="ghost" size="icon" aria-label={`编辑${item.stock_code}`} onClick={() => setEditor(item)}><Pencil /></Button><Button variant="ghost" size="icon" aria-label={`移除${item.stock_code}`} onClick={() => setRemoveTarget(item)}><Trash2 /></Button></div></td>
                 </tr>
               );
             })}</tbody>
           </table>
         </div>
+      )}
+      {removeTarget && (
+        <Card><CardContent className="pt-6 space-y-3">
+          <h2 className="font-semibold">停用 {removeTarget.stock_name}（{removeTarget.stock_code}）</h2>
+          <p className="text-sm text-muted-foreground">仅移除当前账号的启用关注，历史行情和公告保留；其他账号不受影响。之后可从下方已停用列表恢复。</p>
+          <div className="flex gap-2"><Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate(removeTarget.id)}>{remove.isPending ? "停用中…" : "确认停用"}</Button><Button variant="outline" onClick={() => setRemoveTarget(null)}>取消</Button></div>
+        </CardContent></Card>
+      )}
+      {disabledItems.length > 0 && (
+        <section className="space-y-3"><h2 className="font-semibold">已停用</h2><div className="border rounded-lg bg-card divide-y">{disabledItems.map((item) => (
+          <div key={item.id} className="p-3 flex flex-wrap items-center justify-between gap-3"><div><span className="font-medium">{item.stock_name}</span><span className="text-xs text-muted-foreground ml-2">{item.stock_code} · {item.market}</span><p className="text-xs text-muted-foreground mt-1">{item.group_name || "未分组"} · 历史数据保留</p></div><Button variant="outline" size="sm" disabled={restore.isPending} aria-label={`恢复${item.stock_code}`} onClick={() => restore.mutate(item.id)}><RotateCcw className="w-4 h-4 mr-2" />恢复</Button></div>
+        ))}</div></section>
       )}
       {annItem && (
         <Card><CardContent className="pt-6 space-y-3">

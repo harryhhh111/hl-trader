@@ -32,6 +32,17 @@ class ItemDetails(BaseModel):
         return value
 
 
+class NewItem(ItemDetails):
+    market: Literal["US", "CN_HK", "CN_A"]
+    stock_code: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9.\-]+$")
+    stock_name: str = Field(min_length=1, max_length=200)
+    quote_source: Literal["tencent"] = "tencent"
+    quote_symbol: str = Field(min_length=1, max_length=100)
+    exchange_suffix: Literal[".OQ", ".N"] | None = None
+    cik: str | None = Field(default=None, max_length=10)
+    industry: str | None = Field(default=None, max_length=200)
+
+
 class QuoteRequest(BaseModel):
     market: Literal["US", "CN_HK", "CN_A"]
     codes: list[str] = Field(min_length=1, max_length=50)
@@ -45,25 +56,74 @@ class QuoteRequest(BaseModel):
 
 
 @router.get("/watchlist")
-def get_items(request: Request) -> dict:
+def get_items(
+    request: Request,
+    include_disabled: bool = False,
+    session: SessionInfo = Depends(require_session),
+) -> dict:
     try:
-        return {"data": service.list_items(request.app.state.settings.database_url)}
+        return {"data": service.list_items(
+            request.app.state.settings.database_url,
+            session.account_id,
+            include_disabled,
+        )}
     except Exception as exc:
         raise HTTPException(503, "关注列表暂不可用") from exc
 
 
-@router.patch("/watchlist/{item_id}")
-def update_item(item_id: int, body: ItemDetails, request: Request, _session: SessionInfo = Depends(require_session)) -> dict:
+@router.post("/watchlist")
+def add_item(
+    body: NewItem,
+    request: Request,
+    session: SessionInfo = Depends(require_session),
+) -> dict:
     try:
-        return {"data": service.update_item(request.app.state.settings.database_url, item_id, body.model_dump())}
+        return {"data": service.add_item(
+            request.app.state.settings.database_url, body.model_dump(), session.account_id
+        )}
+    except service.WatchlistError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.patch("/watchlist/{item_id}")
+def update_item(item_id: int, body: ItemDetails, request: Request, session: SessionInfo = Depends(require_session)) -> dict:
+    try:
+        return {"data": service.update_item(
+            request.app.state.settings.database_url, item_id, body.model_dump(), session.account_id
+        )}
+    except service.WatchlistError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.delete("/watchlist/{item_id}")
+def disable_item(item_id: int, request: Request, session: SessionInfo = Depends(require_session)) -> dict:
+    try:
+        return {"data": service.set_item_enabled(
+            request.app.state.settings.database_url, item_id, False, session.account_id
+        )}
+    except service.WatchlistError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.post("/watchlist/{item_id}/restore")
+def restore_item(item_id: int, request: Request, session: SessionInfo = Depends(require_session)) -> dict:
+    try:
+        return {"data": service.set_item_enabled(
+            request.app.state.settings.database_url, item_id, True, session.account_id
+        )}
     except service.WatchlistError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
 
 
 @router.post("/watchlist/quotes")
-def quotes(body: QuoteRequest, request: Request) -> dict:
+def quotes(body: QuoteRequest, request: Request, session: SessionInfo = Depends(require_session)) -> dict:
     try:
-        return {"data": service.quote_batch(request.app.state.settings.database_url, body.market, body.codes)}
+        return {"data": service.quote_batch(
+            request.app.state.settings.database_url,
+            body.market,
+            body.codes,
+            owner_account_id=session.account_id,
+        )}
     except service.WatchlistError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     except Exception as exc:

@@ -18,17 +18,43 @@ export interface WatchSuggestion {
 
 export interface WatchItem {
   id: number;
+  enabled: boolean;
   market: Market;
   stock_code: string;
   stock_name: string;
   currency: "USD" | "HKD" | "CNY";
   quote_source: string;
+  quote_symbol: string;
+  exchange_suffix: ".OQ" | ".N" | null;
+  cik: string | null;
   group_name: string;
   note: string;
   research_url: string;
   sort_order: number;
   created_at: string;
   updated_at: string;
+  quote_status: "pending" | "collecting" | "success" | "failed";
+  quote_last_attempt_at: string | null;
+  quote_last_success_at: string | null;
+  quote_latest_trade_date: string | null;
+  quote_record_count: number | null;
+  quote_error: string | null;
+  quote_next_attempt_at: string | null;
+}
+
+export interface NewWatchItem {
+  market: Market;
+  stock_code: string;
+  stock_name: string;
+  quote_source: "tencent";
+  quote_symbol: string;
+  exchange_suffix: ".OQ" | ".N" | null;
+  cik: string | null;
+  industry: string | null;
+  group_name: string;
+  note: string;
+  research_url: string;
+  sort_order: number;
 }
 
 export interface WatchQuote {

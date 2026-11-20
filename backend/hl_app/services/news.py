@@ -327,7 +327,12 @@ def _load_sources_block():
 FEED_DEFAULT_DAYS = 7  # date 缺省时返回最近 7 个北京时间自然日（时间流分组）
 
 
-def feed(date_str: str | None = None, stock: str = "", kind: str = "all") -> dict:
+def feed(
+    date_str: str | None = None,
+    stock: str = "",
+    kind: str = "all",
+    owner_account_id: int | None = None,
+) -> dict:
     """GET /watchlist/news/feed：北京时间自然日信息流（折叠后返回）。
 
     date 缺省返回最近 7 个自然日（前端按日分组为时间流）；date 指定时
@@ -350,7 +355,9 @@ def feed(date_str: str | None = None, stock: str = "", kind: str = "all") -> dic
             "announcements_enabled": enabled}
     # watchlist_item 是基础表：缺失不属于公告降级范围，照常抛服务异常
     watched = {r["stock_code"] for r in ann._read_rows(
-        "SELECT s.stock_code FROM watchlist_items w JOIN securities s ON s.id = w.security_id WHERE s.market='US' AND w.enabled=true")}
+        "SELECT s.stock_code FROM watchlist_items w JOIN securities s ON s.id = w.security_id "
+        "WHERE s.market='US' AND w.enabled=true AND w.owner_account_id IS NOT DISTINCT FROM %s",
+        (owner_account_id,))}
     try:
         logical = ann._load_logical_announcements()
         source_rows, checks, gaps_by_source, projections = _load_sources_block()
@@ -416,7 +423,7 @@ def _ai_available(rows: list[dict], now: datetime) -> bool:
     return any(r.get("importance") for r in recent)
 
 
-def pinned() -> dict:
+def pinned(owner_account_id: int | None = None) -> dict:
     """GET /watchlist/news/pinned（v1.1：热度 × 重要性，封顶 10）。
 
     候选：近 48h（发布时间口径，仅日期/unknown 不回退发现时间）。
@@ -431,7 +438,9 @@ def pinned() -> dict:
             "announcements_enabled": enabled}
     try:
         watched = {r["stock_code"] for r in ann._read_rows(
-            "SELECT s.stock_code FROM watchlist_items w JOIN securities s ON s.id = w.security_id WHERE s.market='US' AND w.enabled=true")}
+            "SELECT s.stock_code FROM watchlist_items w JOIN securities s ON s.id = w.security_id "
+        "WHERE s.market='US' AND w.enabled=true AND w.owner_account_id IS NOT DISTINCT FROM %s",
+        (owner_account_id,))}
     except psycopg2.errors.UndefinedTable:
         raise  # watchlist_item 是基础表：缺失不降级，照常 503
     try:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth import require_session
 from ..services import announcements, news
@@ -17,25 +17,27 @@ def _error(exc: Exception) -> HTTPException:
 
 
 @router.get("/watchlist/announcements")
-def announcement_summary(days: int = 7) -> dict:
+def announcement_summary(request: Request, days: int = 7) -> dict:
     try:
-        return {"data": announcements.summary(days)}
+        return {"data": announcements.summary(days, request.state.session.account_id)}
     except Exception as exc:
         raise _error(exc) from exc
 
 
 @router.get("/watchlist/{item_id}/announcements")
-def announcement_detail(item_id: int, days: int = 90, offset: int = 0, limit: int = 20, source: str = "all") -> dict:
+def announcement_detail(item_id: int, request: Request, days: int = 90, offset: int = 0, limit: int = 20, source: str = "all") -> dict:
     try:
-        return {"data": announcements.detail(item_id, days, offset, limit, source)}
+        return {"data": announcements.detail(
+            item_id, days, offset, limit, source, request.state.session.account_id
+        )}
     except Exception as exc:
         raise _error(exc) from exc
 
 
 @router.get("/news/feed")
-def news_feed(date: str | None = None, stock: str = "", kind: str = "all", offset: int = 0, limit: int = 200) -> dict:
+def news_feed(request: Request, date: str | None = None, stock: str = "", kind: str = "all", offset: int = 0, limit: int = 200) -> dict:
     try:
-        result = news.feed(date, stock, kind)
+        result = news.feed(date, stock, kind, request.state.session.account_id)
         offset = max(0, offset)
         limit = max(1, min(limit, 200))
         entries = result["entries"]
@@ -50,8 +52,8 @@ def news_feed(date: str | None = None, stock: str = "", kind: str = "all", offse
 
 
 @router.get("/news/pinned")
-def news_pinned() -> dict:
+def news_pinned(request: Request) -> dict:
     try:
-        return {"data": news.pinned()}
+        return {"data": news.pinned(request.state.session.account_id)}
     except Exception as exc:
         raise _error(exc) from exc

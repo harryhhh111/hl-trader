@@ -13,12 +13,24 @@ def apply_rollback_delta(source_rows: dict[str, list[dict]], changes: list[dict]
         entity = change["entity"]
         key = canonical(change["natural_key"])
         rows = result.setdefault(entity, [])
-        index = next((position for position, row in enumerate(rows) if canonical({field: row[field] for field in change["natural_key"]}) == key), None)
+        index = next((position for position, row in enumerate(rows) if canonical({field: row.get(field) for field in change["natural_key"]}) == key), None)
         current = rows[index] if index is not None else None
         before, after = change["before"], change["after"]
-        if current == after:
+
+        def matches(expected):
+            if current == expected:
+                return True
+            if current is None or expected is None:
+                return False
+            compatible = dict(current)
+            for field, value in expected.items():
+                if field not in compatible and value is None:
+                    compatible[field] = None
+            return compatible == expected
+
+        if matches(after):
             continue
-        if current != before:
+        if not matches(before):
             raise RecoveryConflict(f"源侧并发变化：{entity} {key}")
         if after is None:
             if index is not None:

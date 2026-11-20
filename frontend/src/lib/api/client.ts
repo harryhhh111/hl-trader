@@ -299,7 +299,14 @@ export const hyperliquidPairsApi = {
 };
 
 export const watchlistApi = {
-  list: () => apiFetch<import("@/lib/types/watchlist").WatchItem[]>("/api/v1/watchlist"),
+  list: () => apiFetch<import("@/lib/types/watchlist").WatchItem[]>("/api/v1/watchlist?include_disabled=true"),
+  add: (item: import("@/lib/types/watchlist").NewWatchItem) =>
+    apiFetch<{ id: number; security_id: number; action: "created" | "restored" }>("/api/v1/watchlist", {
+      method: "POST",
+      body: JSON.stringify(item),
+    }),
+  disable: (itemId: number) => apiFetch<{ id: number; enabled: false }>(`/api/v1/watchlist/${itemId}`, { method: "DELETE" }),
+  restore: (itemId: number) => apiFetch<{ id: number; enabled: true }>(`/api/v1/watchlist/${itemId}/restore`, { method: "POST" }),
   save: (item: Pick<import("@/lib/types/watchlist").WatchItem, "id" | "group_name" | "note" | "research_url" | "sort_order">) =>
     apiFetch<{ id: number }>(`/api/v1/watchlist/${item.id}`, {
       method: "PATCH",

@@ -20,7 +20,13 @@ class SuggestRequest(BaseModel):
 @router.post("/watchlist/suggest")
 def suggest(body: SuggestRequest, request: Request) -> dict:
     try:
-        return {"data": ai.suggest_fields(request.app.state.settings.database_url, body.market, body.stock_code, body.stock_name)}
+        return {"data": ai.suggest_fields(
+            request.app.state.settings.database_url,
+            body.market,
+            body.stock_code,
+            body.stock_name,
+            request.state.session.account_id,
+        )}
     except ai.AIError as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:

@@ -236,7 +236,7 @@ test("pair 页面底部展示调仓交易历史", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
 });
 
-test("关注元数据编辑、AI 草稿修改保存且无新增移除分析入口", async ({ page }, testInfo) => {
+test("关注元数据编辑、AI 草稿修改保存且无外部分析入口", async ({ page }, testInfo) => {
   await login(page);
   await page.goto("/watchlist");
   await page.getByRole("button", { name: "编辑ORCL" }).click();
@@ -246,10 +246,44 @@ test("关注元数据编辑、AI 草稿修改保存且无新增移除分析入�
   await reason.fill("人工修改后的理由");
   await page.getByRole("button", { name: "保存元数据" }).click();
   await expect(page.getByRole("cell", { name: "人工修改后的理由" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "添加股票" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "添加股票" })).toBeVisible();
   await expect(page.locator("a[href*='/analyzer']")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /移除/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "移除ORCL" })).toBeVisible();
   await page.screenshot({ path: `${evidence}/${testInfo.project.name}-watchlist.png`, fullPage: true });
+});
+
+test("新增关注登记待采集、重复校验、停用与恢复", async ({ page }, testInfo) => {
+  const stockCode = testInfo.project.name === "desktop" ? "AAPL" : "MSFT";
+  const stockName = testInfo.project.name === "desktop" ? "Apple" : "Microsoft";
+  await login(page);
+  await page.goto("/watchlist");
+  await page.getByRole("button", { name: "添加股票" }).click();
+  await page.getByLabel("证券代码", { exact: true }).fill(stockCode);
+  await page.getByLabel("证券名称", { exact: true }).fill(stockName);
+  await page.getByLabel("腾讯行情代码", { exact: true }).fill(`${stockCode}.OQ`);
+  await page.getByLabel("CIK（可选）", { exact: true }).fill("320193");
+  await page.getByLabel("分组", { exact: true }).fill("科技");
+  await page.getByRole("button", { name: "保存并等待回补" }).click();
+  await expect(page.getByRole("status")).toContainText("等待 worker 回补历史日线");
+  const row = page.locator("tr").filter({ hasText: stockCode });
+  await expect(row.getByRole("cell", { name: stockName })).toBeVisible();
+  await expect(row.getByText("待首次采集，等待 worker 执行")).toBeVisible();
+
+  await page.getByRole("button", { name: "添加股票" }).click();
+  await page.getByLabel("证券代码", { exact: true }).fill(stockCode);
+  await page.getByLabel("证券名称", { exact: true }).fill(stockName);
+  await page.getByLabel("腾讯行情代码", { exact: true }).fill(`${stockCode}.OQ`);
+  await page.getByRole("button", { name: "保存并等待回补" }).click();
+  await expect(page.getByRole("alert")).toContainText("该证券已在关注列表中");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+
+  await page.getByRole("button", { name: `移除${stockCode}` }).click();
+  await page.getByRole("button", { name: "确认停用" }).click();
+  await expect(page.getByRole("status")).toContainText("已停用关注");
+  await expect(page.getByRole("button", { name: `恢复${stockCode}` })).toBeVisible();
+  await page.getByRole("button", { name: `恢复${stockCode}` }).click();
+  await expect(page.getByRole("status")).toContainText("已恢复关注");
+  await expect(page.getByRole("button", { name: `移除${stockCode}` })).toBeVisible();
 });
 
 test("资讯筛选、置顶与来源状态", async ({ page }, testInfo) => {

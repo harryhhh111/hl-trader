@@ -159,6 +159,7 @@ def test_scheduler_holds_lock_while_idle_and_releases_on_exit(seeded, monkeypatc
     monkeypatch.setenv("HL_APP_COLLECTORS_ENABLED", "true")
     monkeypatch.setenv("HL_APP_SCHEDULER_ENABLED", "true")
     monkeypatch.setattr(workers, "enabled_securities", lambda _url: [])
+    monkeypatch.setattr(workers, "due_securities", lambda _url: [])
     monkeypatch.setattr(workers, "registered_sources", lambda _url: [])
     monkeypatch.setattr(workers, "ensure_sec_sources", lambda _url: 0)
 

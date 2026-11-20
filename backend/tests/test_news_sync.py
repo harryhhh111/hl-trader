@@ -147,7 +147,7 @@ def test_sync_failure_retries_next_interval_and_keeps_monitors_running(monkeypat
     lifecycle, clock = scheduler
     calls = []
 
-    def run_once(_url, kind, _lifecycle):
+    def run_once(_url, kind, _lifecycle, **_kwargs):
         calls.append((kind, clock.now))
         if kind == "news_sync" and sum(task == kind for task, _ in calls) == 1:
             raise error
@@ -167,7 +167,7 @@ def test_sync_retry_delay_starts_after_failed_request_finishes(monkeypatch, sche
     clock.stop_at = 105
     attempts = []
 
-    def run_once(_url, kind, _lifecycle):
+    def run_once(_url, kind, _lifecycle, **_kwargs):
         if kind == "news_sync":
             attempts.append(clock.now)
             clock.now += 20
@@ -182,7 +182,7 @@ def test_sync_retry_delay_starts_after_failed_request_finishes(monkeypatch, sche
 def test_sync_error_does_not_hide_lost_worker_lifecycle(monkeypatch, scheduler):
     lifecycle, _clock = scheduler
 
-    def run_once(_url, kind, _lifecycle):
+    def run_once(_url, kind, _lifecycle, **_kwargs):
         if kind == "news_sync":
             lifecycle.lost = True
             raise news_sync.NewsSyncError("HTTP 503", 503)

@@ -130,13 +130,12 @@ def test_only_closed_daily_bars_are_stored(market, current, expected) -> None:
     assert len(closed_records(records, market, current)) == expected
 
 
-def test_watchlist_has_no_create_delete_and_patch_rejects_identity(monkeypatch) -> None:
+def test_watchlist_rejects_invalid_identity_and_quote_code() -> None:
     app = FastAPI()
     app.include_router(watchlist.router, prefix="/api/v1")
     app.dependency_overrides[require_session] = lambda: None
     client = TestClient(app)
-    assert client.post("/api/v1/watchlist", json={}).status_code == 405
-    assert client.delete("/api/v1/watchlist/1").status_code == 405
+    assert client.post("/api/v1/watchlist", json={}).status_code == 422
     response = client.patch(
         "/api/v1/watchlist/1",
         json={"market": "US", "stock_code": "OTHER", "enabled": True},

@@ -28,7 +28,7 @@ function quote(market: "US" | "CN_A", close: number): QuoteBatch {
   };
 }
 
-test("三市场表格按市场隔离同码证券且无新增移除分析入口", () => {
+test("三市场表格按市场隔离同码证券并提供关注管理入口", () => {
   const qc = new QueryClient();
   const base = {
     id: 1,
@@ -53,5 +53,8 @@ test("三市场表格按市场隔离同码证券且无新增移除分析入口",
   );
   assert.match(html, /102/);
   assert.match(html, />10</);
-  assert.doesNotMatch(html, />添加股票<|>移除<|analyzer|StockSearch/);
+  assert.match(html, /添加股票/);
+  assert.match(html, /移除000001/);
+  assert.match(html, /待首次采集/);
+  assert.doesNotMatch(html, /analyzer|StockSearch/);
 });

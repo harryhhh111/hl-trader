@@ -322,7 +322,7 @@ def _company_sources(source_rows, checks, gaps_by_source, cik, enabled):
 
 # ── 批量摘要 ───────────────────────────────────────────────
 
-def summary(days: int = 7) -> dict:
+def summary(days: int = 7, owner_account_id: int | None = None) -> dict:
     """GET /watchlist/announcements 批量摘要（一次返回全部关注项）。"""
     days = max(1, min(int(days or 7), SUMMARY_MAX_DAYS))
     enabled = _announcements_enabled()
@@ -337,7 +337,8 @@ def summary(days: int = 7) -> dict:
         items = _read_rows(
             "SELECT w.id, s.market, s.stock_code, s.stock_name "
             "FROM watchlist_items w JOIN securities s ON s.id = w.security_id "
-            "WHERE w.enabled = true ORDER BY w.sort_order, w.id")
+            "WHERE w.enabled = true AND w.owner_account_id IS NOT DISTINCT FROM %s "
+            "ORDER BY w.sort_order, w.id", (owner_account_id,))
     except psycopg2.errors.UndefinedTable:
         raise
     us_codes = [i["stock_code"] for i in items if i["market"] == "US"]
@@ -411,7 +412,7 @@ def summary(days: int = 7) -> dict:
 # ── 详情分页 ───────────────────────────────────────────────
 
 def detail(item_id: int, days: int = 90, offset: int = 0, limit: int = 20,
-           source: str = "all") -> dict:
+           source: str = "all", owner_account_id: int | None = None) -> dict:
     """GET /watchlist/{item_id}/announcements 详情分页。
 
     先解析关注项，再按 market+stock_code 查询历史——删除后重新关注
@@ -428,7 +429,9 @@ def detail(item_id: int, days: int = 90, offset: int = 0, limit: int = 20,
     items = _read_rows(
         "SELECT w.id, s.market, s.stock_code, s.stock_name "
         "FROM watchlist_items w JOIN securities s ON s.id = w.security_id "
-        "WHERE w.id = %s AND w.enabled = true", (item_id,))
+        "WHERE w.id = %s AND w.enabled = true "
+        "AND w.owner_account_id IS NOT DISTINCT FROM %s",
+        (item_id, owner_account_id))
     if not items:
         raise LookupError("关注项不存在")
     item = items[0]

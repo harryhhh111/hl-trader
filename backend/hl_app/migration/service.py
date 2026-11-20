@@ -188,6 +188,8 @@ def inspect_bundle(path: Path) -> dict:
     if not manifest.get("quiesced"):
         raise BundleError("正式 full 必须来自停写一致性快照")
     _validate_references(rows)
+    if any(row.get("owner_account_id") is not None for row in rows["watchlist_items"]):
+        raise BundleError("stock_data 全量包不支持账号级关注归属")
     return {
         "bundle_id": manifest["bundle_id"],
         "manifest_sha256": manifest_hash,
@@ -203,6 +205,11 @@ def _import_business_hash(conn, bundle_rows: dict) -> str:
         for row in current[entity]:
             if row.get("ingest_mode") == "direct":
                 row.pop("ingest_mode")
+    entity = "watchlist_items"
+    if all("owner_account_id" not in row for row in bundle_rows[entity]):
+        for row in current[entity]:
+            if row.get("owner_account_id") is None:
+                row.pop("owner_account_id", None)
     return business_hash(current)
 
 
