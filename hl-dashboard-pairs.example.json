@@ -20,6 +20,16 @@
       "coins": ["xyz:NBIS", "xyz:CRWV"],
       "account_address": null,
       "unlock_anchors": null
+    },
+    {
+      "id": "mu-sndk",
+      "label": "MU / SNDK",
+      "enabled": true,
+      "network": "mainnet",
+      "dex": "xyz",
+      "coins": ["xyz:MU", "xyz:SNDK"],
+      "account_address": null,
+      "unlock_anchors": null
     }
   ]
 }

@@ -10,6 +10,7 @@
 | 目标仓位调整与托管钱包 | 公开地址切换、托管 API Wallet、交易历史；托管路径包含授权核对、challenge、钱包版本、请求幂等及 memfd 传钥；同账户可跨 pair 共享钱包并串行化写入。2026-11-20 调仓弹窗已改为仅使用托管钱包，底层浏览器签名兼容接口及其他操作的签名入口保留 | `17f530f`、`c79c441`、`3b828b6`；[弹窗部署记录](deployment/MANAGED_ONLY_ADJUSTMENT_2026_11_20.md) |
 | 实时盘口、滑点和深度保护 | 弹窗每 5 秒读取两腿 BBO；最大滑点默认 5 bps、允许 1–50，按保护价核对所需数量深度，每腿签名或发送前重读盘口；结果与历史展示成交滑点和未发送状态。2026-11-19 已部署 Web、执行器及前端 | `e6de848`；[盘口与滑点合同](HYPERLIQUID_ADJUSTMENT_LIVE_QUOTES.md)、[部署记录](deployment/ADJUSTMENT_DEPTH_2026_11_19.md) |
 | 统一账户权益与比价展示 | Unified / Portfolio 模式读取账户级 portfolio 权益，失败时保留独立仓位并降级权益字段；比价和 30MA 使用五位有效数字。11 月 19 日执行器升级覆盖权益修复的问题已于 2026-11-20 经授权修复部署；HYPE/BTC、NBIS/CRWV 真实公开账户只读核验均返回 account=ok、账户总权益和完整来源键 | `72f3d36`；[权益修复部署记录](deployment/ACCOUNT_EQUITY_2026_11_20.md) |
+| MU / SNDK Pair | `mu-sndk` 使用 `xyz:MU` 多 / `xyz:SNDK` 空，匹配现有 13 MU 多仓和 130 SNDK 空仓，Cross 2x。2026-11-25 已将 `vinci` 账户绑定到当前登录账号；Rust 与后端看板的 account/positions/ratio/funding 均为 ok，增仓前检查通过，未执行调仓 | `hl-dashboard-pairs.example.json`；真实公开账户只读核验 |
 | 账号注册与登录 | `account` 模式提供邮箱密码注册/登录，Hyperliquid 资源接入用户归属；另保留 token 和 Cloudflare Access 模式 | `0c516bb`；认证异常不回退 token 表单的修复为 `d030122` |
 | 更新日志 | `/changelog` 展示人工维护的发布说明；页面条目不是完整 Git 提交清单 | `cb3cc0e` |
 | 开发验证环境 | 提供 `make test-fast/test-db/test-e2e/test-gateway/verify`；E2E 固定 UTF-8、当前源码和非 root 镜像，Rust 工具链与 Docker Cargo 使用持久缓存 | [运行手册](deployment/INDEPENDENT_APP.md#4-标准验证) |
