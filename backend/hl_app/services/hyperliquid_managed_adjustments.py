@@ -153,7 +153,7 @@ def preview_managed(
     request_id = _request_id(request_id)
     if type(wallet_version) is not int or wallet_version < 1:
         raise wallets.WalletError(422, "托管钱包版本非法")
-    target = adjustments._decimal(target_notional, "每腿目标名义")
+    target = adjustments._decimal(target_notional, "基准目标名义")
     selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
     payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected, max_slippage_bps)
@@ -275,9 +275,9 @@ def execute_managed(
 ) -> tuple[dict, int]:
     max_slippage_bps = adjustments._slippage(max_slippage_bps)
     request_id = _request_id(request_id)
-    target = adjustments._decimal(target_notional, "每腿目标名义")
+    target = adjustments._decimal(target_notional, "基准目标名义")
     if confirmation.strip() != adjustments._decimal_arg(target):
-        raise wallets.WalletError(422, "确认金额必须与每腿目标名义完全一致")
+        raise wallets.WalletError(422, "确认金额必须与基准目标名义完全一致")
     selected = adjustments._leg_indices(leg_indices)
     descriptor, account = adjustments._resolve(url, pair_id, account_address, config_revision, session.account_id)
     payload_hash = _payload_hash(descriptor, account, target, config_revision, wallet_version, selected, max_slippage_bps)

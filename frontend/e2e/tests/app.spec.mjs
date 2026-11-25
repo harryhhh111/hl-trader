@@ -35,7 +35,7 @@ test("账户添加与调仓表单按需弹窗展示", async ({ page }) => {
   await page.goto("/hyperliquid/pairs/nbis-crwv");
   await expect(page.getByRole("heading", { name: "NBIS / CRWV" })).toBeVisible();
   await expect(page.getByLabel("账户名称")).toHaveCount(0);
-  await expect(page.getByLabel("每腿目标名义", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("基准目标名义", { exact: true })).toHaveCount(0);
   await expect(page.getByText("托管 API Wallet", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "调整仓位", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
@@ -51,7 +51,7 @@ test("账户添加与调仓表单按需弹窗展示", async ({ page }) => {
   await page.getByRole("button", { name: "调整仓位", exact: true }).click();
   const adjustmentDialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
   await expect(adjustmentDialog).toBeVisible();
-  await expect(adjustmentDialog.getByLabel("每腿目标名义")).toHaveValue("2000");
+  await expect(adjustmentDialog.getByLabel("基准目标名义")).toHaveValue("2000");
   await expect(adjustmentDialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= (visualViewport?.width ?? innerWidth) + 1)).toBe(true);
   await adjustmentDialog.getByRole("button", { name: "关闭弹窗" }).click();
@@ -99,14 +99,14 @@ test("Pair 风险规则保存后展示触发提醒和人工平仓预览", async 
   await page.getByRole("button", { name: "预览并人工平仓", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "调整两腿仓位", exact: true });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel("每腿目标名义")).toHaveValue("0");
+  await expect(dialog.getByLabel("基准目标名义")).toHaveValue("0");
   await expect(dialog.getByRole("button", { name: "预览调仓差额" })).toBeVisible();
 });
 
 test("阈值再平衡保存规则并仅打开候选腿的人工预览", async ({ page }) => {
   await login(page);
   await page.goto("/hyperliquid/pairs/nbis-crwv");
-  await page.getByLabel("再平衡每腿目标名义").fill("2000");
+  await page.getByLabel("再平衡基准目标名义").fill("2000");
   await page.getByLabel("再平衡偏离阈值").fill("10");
   await page.getByLabel("启用阈值再平衡监控").check();
   await page.getByRole("button", { name: "保存再平衡规则", exact: true }).click();
@@ -147,7 +147,7 @@ test("阈值再平衡保存规则并仅打开候选腿的人工预览", async ({
   await page.getByRole("button", { name: "重新预览并人工再平衡", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "调整指定腿仓位", exact: true });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByLabel("每腿目标名义", { exact: true })).toHaveValue("2000");
+  await expect(dialog.getByLabel("基准目标名义", { exact: true })).toHaveValue("2000");
   await expect(dialog.getByText("本次仅调整 xyz:NBIS，另一腿保持不动。")).toBeVisible();
 });
 
@@ -374,7 +374,7 @@ test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
   await expect(dialog.getByText("实时盘口（每 5 秒更新）")).toBeVisible();
   await expect(dialog.getByText("中 123.29", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "预览调仓差额" }).click();
-  await dialog.getByLabel("确认目标金额", { exact: true }).fill("2000");
+  await dialog.getByLabel("确认基准目标金额", { exact: true }).fill("2000");
   const execute = dialog.getByRole("button", { name: "使用托管钱包下单" });
   await expect(execute).toBeEnabled();
 
@@ -383,7 +383,7 @@ test("调仓弹窗轮询盘口并使过期预览失效", async ({ page }) => {
   await expect(execute).toBeDisabled();
   await dialog.getByRole("button", { name: "按最新盘口重新预览" }).click();
   await expect(execute).toBeDisabled();
-  await dialog.getByLabel("确认目标金额", { exact: true }).fill("2000");
+  await dialog.getByLabel("确认基准目标金额", { exact: true }).fill("2000");
   await expect(execute).toBeEnabled();
   expect(quoteCalls).toBeGreaterThanOrEqual(2);
 

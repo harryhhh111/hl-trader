@@ -215,7 +215,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
       >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            目标为每腿绝对名义（USD）；默认方向 {descriptor.coins[0]} 多 / {descriptor.coins[1]} 空。使用账户配置中的托管 API Wallet，先预览差额，再输入目标金额确认执行。
+            基准目标名义（USD）按 Pair 权重分配：{descriptor.coins[0]} × {descriptor.target_leg_weights[0]}，{descriptor.coins[1]} × {descriptor.target_leg_weights[1]}。默认方向 {descriptor.coins[0]} 多 / {descriptor.coins[1]} 空。使用账户配置中的托管 API Wallet，先预览差额，再输入基准目标金额确认执行。
             {legIndices != null && <span className="text-amber-700">本次仅调整 {legIndices.map((index) => descriptor.coins[index]).join('、')}，另一腿保持不动。</span>}
             {' '}<Link className="text-primary underline underline-offset-4" to="/hyperliquid/adjustment-guide">查看使用说明</Link>
           </p>
@@ -240,9 +240,9 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                 </select>
               </label>
               <label className="grid w-full gap-1 text-sm sm:w-auto">
-                <span>每腿目标名义（USD）</span>
+                <span>基准目标名义（USD）</span>
                 <input
-                  aria-label="每腿目标名义"
+                  aria-label="基准目标名义"
                   className="w-full rounded-md border bg-background px-3 py-2 font-mono sm:w-52"
                   type="number"
                   min="0"
@@ -341,10 +341,10 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
                 <div className="space-y-3 border-t pt-3">
                   <p className="text-sm text-muted-foreground">交易账户 <span className="font-mono">{accountShort(account ?? '')}</span></p>
                   <p className="text-sm">托管签名账户 <span className="font-mono">{accountShort(managedWallet.data?.wallet_address ?? report.wallet_address ?? '')}</span> · v{report.wallet_version}</p>
-                  <p className="text-sm text-muted-foreground">请核对两腿订单，并输入目标金额确认使用托管 API Wallet 执行。</p>
+                  <p className="text-sm text-muted-foreground">请核对两腿订单，并输入基准目标金额确认使用托管 API Wallet 执行。</p>
                   <label className="grid gap-1 text-sm">
-                    <span>确认目标金额（USD）</span>
-                    <input aria-label="确认目标金额" className="w-full rounded-md border bg-background px-3 py-2 font-mono sm:w-52"
+                    <span>确认基准目标金额（USD）</span>
+                    <input aria-label="确认基准目标金额" className="w-full rounded-md border bg-background px-3 py-2 font-mono sm:w-52"
                       value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={busy} required />
                   </label>
                   <Button type="button" variant="destructive" disabled={busy || stalePreview || policyBlocked || !managedWallet.data?.configured || confirmation.trim() !== target.trim()} onClick={() => managed.mutate()}>

@@ -82,7 +82,7 @@ export function RebalanceControls({ descriptor, configRevision }: {
           <CardTitle className="text-base flex items-center gap-2"><Scale className="h-4 w-4" />阈值再平衡</CardTitle>
           {rule && <Badge variant="secondary" className={hasCandidate ? 'bg-amber-500/10 text-amber-700' : ''}>{statusLabels[rule.status]}</Badge>}
         </div>
-        <CardDescription>固定每腿目标名义，连续两次检查达到偏离阈值后生成候选预览；只调整候选腿，不会自动下单。</CardDescription>
+        <CardDescription>固定基准目标名义，按 {descriptor.coins[0]} {descriptor.target_leg_weights[0]} : {descriptor.coins[1]} {descriptor.target_leg_weights[1]} 分配；连续两次检查达到偏离阈值后生成候选预览，只调整候选腿，不会自动下单。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         {account == null ? <p className="text-muted-foreground">请先选择账户。</p> : <>
@@ -98,7 +98,7 @@ export function RebalanceControls({ descriptor, configRevision }: {
           {rule?.last_error && <p role="alert" className="text-amber-600">{rule.last_error}</p>}
           {rule?.risk_blocked && <p role="alert" className="text-amber-600">Pair 止盈止损已触发或仍有未核清平仓，已暂停再平衡候选与确认。</p>}
           {rule && hasCandidate && <div className="rounded-md bg-amber-500/10 p-3 text-amber-700" role="alert">
-            <p className="font-medium">候选腿：{rule.candidate_leg_indices.map((index) => descriptor.coins[index]).join('、')}；目标为每腿 {rule.target_notional} USD。</p>
+            <p className="font-medium">候选腿：{rule.candidate_leg_indices.map((index) => descriptor.coins[index]).join('、')}；基准目标 {rule.target_notional} USD，按 {descriptor.target_leg_weights[0]}:{descriptor.target_leg_weights[1]} 分配。</p>
             <p className="mt-1 text-xs">候选生成于 {optionalTime(rule.candidate_at)}。触发预览只用于提示，实际执行前必须重新读取仓位和盘口。</p>
             {rule.candidate_preview && <ul className="mt-2 space-y-1 text-xs">
               {rule.candidate_preview.legs.filter((leg) => leg.action !== 'none').map((leg) => <li key={leg.coin}>
@@ -114,8 +114,8 @@ export function RebalanceControls({ descriptor, configRevision }: {
           {rule?.status === 'cooling' && <p className="text-muted-foreground">本次已完成，冷却至 {optionalTime(rule.cooldown_until)}；冷却后仍需重新连续确认。</p>}
           <form className="grid gap-3 lg:grid-cols-[1fr_1fr_auto_auto] lg:items-end" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
             <label className="grid gap-1">
-              <span>每腿目标名义（USD）</span>
-              <input aria-label="再平衡每腿目标名义" className="rounded-md border bg-background px-3 py-2 font-mono" type="number" min="0" step="any" value={target} onChange={(event) => setTarget(event.target.value)} required />
+              <span>基准目标名义（USD）</span>
+              <input aria-label="再平衡基准目标名义" className="rounded-md border bg-background px-3 py-2 font-mono" type="number" min="0" step="any" value={target} onChange={(event) => setTarget(event.target.value)} required />
             </label>
             <label className="grid gap-1">
               <span>偏离阈值（%）</span>

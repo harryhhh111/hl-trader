@@ -87,6 +87,7 @@ def test_history_combines_current_and_archives_without_duplicates(tmp_path) -> N
     assert result["skipped_reports"] == 1
     assert result["has_more"] is False
     assert "signing_requests" not in result["items"][0]
+    assert result["items"][0]["target_leg_weights"] == ["1", "1"]
     assert result["items"][0]["legs"][0]["oid"] == 12345
 
 

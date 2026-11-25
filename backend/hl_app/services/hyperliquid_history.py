@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import hyperliquid_accounts as accounts_service
 from . import hyperliquid_adjustments as adjustments
+from . import hyperliquid_pairs as pairs_service
 
 ACTION_ID_RE = re.compile(r"^adjust-0x[0-9a-f]{32}$")
 ARCHIVE_RE = re.compile(
@@ -116,12 +117,18 @@ def _report(value: dict, descriptor: dict, account: str) -> dict | None:
     request_id = value.get("request_id")
     if request_id is not None and not isinstance(request_id, str):
         raise ValueError("invalid request id")
+    target_leg_weights = value.get(
+        "target_leg_weights", list(pairs_service.DEFAULT_TARGET_LEG_WEIGHTS)
+    )
+    if not pairs_service._target_weights_match(target_leg_weights, target_leg_weights):
+        raise ValueError("invalid target leg weights")
     return {
         "action_id": value["action_id"],
         "request_id": request_id,
         "execution_mode": "managed" if request_id else "browser" if value.get("expected_signer") else "server",
         "status": "running" if value["status"] == "executing" else value["status"],
         "target_notional": _decimal(value.get("target_notional")),
+        "target_leg_weights": target_leg_weights,
         "created_at": _timestamp(value.get("created_at")),
         "legs": [_leg(leg, descriptor["coins"]) for leg in legs],
         "diagnostics": diagnostics,

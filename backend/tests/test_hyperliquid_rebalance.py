@@ -47,6 +47,7 @@ def rule(**changes) -> dict:
 
 
 def snapshot(first: str | None, second: str | None, **changes) -> dict:
+    descriptor = next(item for item in pairs.load_pairs()[1] if item["id"] == "nbis-crwv")
     items = []
     if first is not None:
         items.append({"coin": "xyz:NBIS", "side": "long", "notional": first})
@@ -60,6 +61,7 @@ def snapshot(first: str | None, second: str | None, **changes) -> dict:
         "pair": {
             "id": "nbis-crwv", "network": "mainnet", "dex": "xyz",
             "coins": ["xyz:NBIS", "xyz:CRWV"], "account_address": ADDRESS_LOWER,
+            "target_leg_weights": descriptor["target_leg_weights"],
         },
         "blocks": {"positions": {
             "status": "ok", "position_state": state, "items": items, "open_orders": 0,
@@ -75,6 +77,21 @@ def test_drift_uses_absolute_target_distance_and_threshold_boundary(configured) 
     assert result["observed_leg_indices"] == [0]
     assert rebalance.evaluate_snapshot(snapshot("1800", "2200"), rule(), NOW)["observed_leg_indices"] == [0, 1]
     assert rebalance.evaluate_snapshot(snapshot("2201", "1799"), rule(), NOW)["observed_leg_indices"] == [0, 1]
+
+
+def test_weighted_pair_drift_uses_each_leg_target(configured, monkeypatch, tmp_path) -> None:
+    data = json.loads(json.dumps(VALID))
+    data["pairs"][1]["target_leg_weights"] = ["0.8", "1"]
+    path = tmp_path / "weighted-pairs.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("HL_APP_PAIRS_CONFIG", str(path))
+    pairs.clear_cache()
+    balanced = rebalance.evaluate_snapshot(snapshot("1600", "2000"), rule(), NOW)
+    assert balanced["drift_pct"] == ["0", "0"]
+    assert balanced["observed_leg_indices"] == []
+    drifted = rebalance.evaluate_snapshot(snapshot("2000", "2000"), rule(), NOW)
+    assert drifted["drift_pct"] == ["25", "0"]
+    assert drifted["observed_leg_indices"] == [0]
 
 
 def test_flat_is_not_a_new_opening_signal(configured) -> None:

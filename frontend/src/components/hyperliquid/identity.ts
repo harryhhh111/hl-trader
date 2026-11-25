@@ -4,7 +4,7 @@ export type SnapshotIdentitySource = Pick<HlPairSnapshot, 'config_revision' | 'p
 
 /**
  * 快照身份检查（整改 R2）：渲染任何快照数据前必须通过。
- * 比较 config_revision、pair id、network、dex、有序 coins、归一化地址。
+ * 比较 config_revision、pair id、network、dex、有序 coins、目标权重、归一化地址。
  */
 export function snapshotIdentityMatches(
   snapshot: SnapshotIdentitySource,
@@ -19,6 +19,8 @@ export function snapshotIdentityMatches(
   if (snapPair.coins?.length !== 2 || descriptor.coins?.length !== 2) return false;
   if (snapPair.coins[0] !== descriptor.coins[0]) return false;
   if (snapPair.coins[1] !== descriptor.coins[1]) return false;
+  if (snapPair.target_leg_weights?.length !== 2
+    || snapPair.target_leg_weights.some((weight, index) => Number(weight) !== Number(descriptor.target_leg_weights[index]))) return false;
   return (snapPair.account_address ?? '').toLowerCase()
     === (descriptor.account_address ?? '').toLowerCase();
 }

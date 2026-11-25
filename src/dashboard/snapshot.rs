@@ -837,8 +837,14 @@ fn build_positions_block(
         match (notionals[0], notionals[1]) {
             (Some(n1), Some(n2)) if n1 > Decimal::ZERO && n2 > Decimal::ZERO => {
                 notional_ratio = Some((n1 / n2).round_dp(4).to_string());
+                let weighted = [
+                    n1 / descriptor.target_leg_weights[0],
+                    n2 / descriptor.target_leg_weights[1],
+                ];
                 drift = Some(
-                    ((n1 - n2).abs() / ((n1 + n2) / Decimal::TWO) * Decimal::ONE_HUNDRED)
+                    ((weighted[0] - weighted[1]).abs()
+                        / ((weighted[0] + weighted[1]) / Decimal::TWO)
+                        * Decimal::ONE_HUNDRED)
                         .round_dp(2)
                         .to_string(),
                 );
@@ -1342,6 +1348,7 @@ mod tests {
                 dex: dex.to_string(),
                 coins: [coins[0].to_string(), coins[1].to_string()],
                 account_address: account.map(|a| a.to_string()),
+                target_leg_weights: super::super::config::default_target_leg_weights(),
                 unlocks_enabled: false,
             },
             enabled: true,
@@ -1544,6 +1551,23 @@ mod tests {
 
     fn to_json(snapshot: &PairSnapshot) -> Value {
         serde_json::from_str(&pair_snapshot_json(snapshot).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn notional_drift_uses_pair_target_weights() {
+        let server = MockServer::start_async().await;
+        let account = Box::leak(
+            ACCOUNT_TWO_LEGS
+                .replace("\"szi\": \"25\"", "\"szi\": \"19.2\"")
+                .into_boxed_str(),
+        );
+        mock_essentials(&server, META_XYZ, account);
+        let mut p = pair(["xyz:NBIS", "xyz:CRWV"], "xyz", Some(USER));
+        p.descriptor.target_leg_weights = [Decimal::new(8, 1), Decimal::ONE];
+        let v = to_json(&collect(&server, &p, realtime_ms()).await);
+        let positions = &v["blocks"]["positions"];
+        assert_eq!(positions["notional_ratio"], "0.8");
+        assert_eq!(positions["ratio_drift_pct"], "0");
     }
 
     #[tokio::test]

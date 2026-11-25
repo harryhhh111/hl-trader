@@ -8,6 +8,7 @@ const DESCRIPTOR: HlPairDescriptor = {
   id: 'nbis-crwv', label: 'NBIS / CRWV', network: 'mainnet', dex: 'xyz',
   coins: ['xyz:NBIS', 'xyz:CRWV'],
   account_address: '0x7f2120f612b78d579197762196b8a202ab654096',
+  target_leg_weights: ['1', '1'],
   unlocks_enabled: false,
 };
 
@@ -25,6 +26,11 @@ test('两组地址都为 null 时匹配', () => {
 
 test('config_revision 不同即拒绝', () => {
   assert.equal(snapshotIdentityMatches(SNAPSHOT, 'rev2', DESCRIPTOR), false);
+});
+
+test('目标权重不同即拒绝', () => {
+  assert.equal(snapshotIdentityMatches(SNAPSHOT, 'rev1',
+    { ...DESCRIPTOR, target_leg_weights: ['0.8', '1'] }), false);
 });
 
 test('同 ID 换账户即拒绝', () => {

@@ -62,8 +62,18 @@ def test_directory_returns_enabled_pairs_with_revision(client):
     hype, nbis = data['pairs']
     assert hype['id'] == 'hype-btc' and hype['account_address'] is None
     assert hype['unlocks_enabled'] is True
+    assert hype['target_leg_weights'] == ['1', '1']
     assert nbis['account_address'] == ADDRESS_LOWER  # 大写输入归一化
     assert nbis['unlocks_enabled'] is False
+
+
+def test_pair_target_weights_are_exposed_in_coin_order(client):
+    import copy
+    data = copy.deepcopy(VALID)
+    data['pairs'][1]['target_leg_weights'] = ['0.80', '1.0']
+    write_config(client, data)
+    body = client[0].get('/api/v1/hyperliquid/pairs').json()['data']
+    assert body['pairs'][1]['target_leg_weights'] == ['0.8', '1']
 
 
 def test_disabled_pair_excluded_from_directory(client):
@@ -105,6 +115,9 @@ def test_duplicate_json_key_is_503(client, raw):
     (lambda d: d['pairs'][0].update(id='nbis-crwv'), '重复 pair id'),
     (lambda d: d['pairs'][0].pop('enabled'), '缺少字段'),
     (lambda d: d['pairs'][0].update(enabled='yes'), '布尔'),
+    (lambda d: d['pairs'][0].update(target_leg_weights=['0.8']), 'target_leg_weights'),
+    (lambda d: d['pairs'][0].update(target_leg_weights=['0', '1']), 'target_leg_weights'),
+    (lambda d: d['pairs'][0].update(target_leg_weights=['0.8', '0.9']), 'target_leg_weights'),
     (lambda d: d['pairs'][0].update(network='devnet'), 'network'),
     (lambda d: d['pairs'][1]['coins'].__setitem__(0, 'NBIS'), '形式'),
     (lambda d: d['pairs'][1]['coins'].__setitem__(1, 'xyz:NBIS'), '必须不同'),

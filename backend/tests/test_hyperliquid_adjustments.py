@@ -148,6 +148,21 @@ def test_known_unknown_process_report_is_returned_not_hidden(configured, monkeyp
     assert result["status"] == "unknown"
 
 
+def test_asymmetric_report_must_confirm_pair_weights(configured, monkeypatch, tmp_path) -> None:
+    data = json.loads(json.dumps(VALID))
+    data["pairs"][1]["target_leg_weights"] = ["0.8", "1"]
+    path = tmp_path / "weighted-pairs.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("HL_APP_PAIRS_CONFIG", str(path))
+    pairs.clear_cache()
+    weighted_revision, descriptors = pairs.load_pairs()
+    descriptor = next(item for item in descriptors if item["id"] == "nbis-crwv")
+    with pytest.raises(adjustments.AdjustmentError, match="身份校验失败"):
+        adjustments._parse_report(json.dumps(report(weighted_revision)), descriptor, ADDRESS_LOWER, Decimal("2000"))
+    weighted = {**report(weighted_revision), "target_leg_weights": ["0.8", "1"]}
+    assert adjustments._parse_report(json.dumps(weighted), descriptor, ADDRESS_LOWER, Decimal("2000")) == weighted
+
+
 def test_result_identity_mismatch_is_rejected(configured) -> None:
     descriptor = next(item for item in pairs.load_pairs()[1] if item["id"] == "nbis-crwv")
     malformed = report(configured)

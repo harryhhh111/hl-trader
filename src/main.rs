@@ -137,7 +137,7 @@ enum Commands {
         #[arg(long, required = true)]
         json: bool,
     },
-    /// 把多 pair 两腿调整到每腿目标 USD 名义；默认只预览，--execute 才签名下单。
+    /// 按 pair 目标权重把两腿调整到基准目标 USD 名义；默认只预览，--execute 才签名下单。
     Adjust {
         #[arg(long)]
         pair: String,

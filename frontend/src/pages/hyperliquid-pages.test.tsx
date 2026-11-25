@@ -229,10 +229,20 @@ test('仓位标题旁展示调仓入口，目标与预览表单默认收进弹�
   assert.match(html, /调整仓位/);
   assert.match(html, /aria-haspopup="dialog"/);
   assert.match(html, /开仓均价/);
-  assert.doesNotMatch(html, /aria-label="每腿目标名义"/);
+  assert.doesNotMatch(html, /aria-label="基准目标名义"/);
   assert.doesNotMatch(html, /预览调仓差额/);
   assert.doesNotMatch(html, /查看使用说明/);
   assert.doesNotMatch(html, /确认并真实下单/);
+  qc.clear();
+});
+
+test('Pair 按配置顺序展示非对称目标权重', () => {
+  const value = snapshot(nbisFixture);
+  value.pair.target_leg_weights = ['0.8', '1'];
+  const qc = seed(value);
+  const html = renderDetail(qc, value.pair.id).replace(/<!-- -->/g, '');
+  assert.match(html, /目标名义比/);
+  assert.match(html, /xyz:NBIS:xyz:CRWV = 0.8:1/);
   qc.clear();
 });
 
@@ -332,6 +342,7 @@ test('交易历史位于详情页底部并展示两腿成交与订单 ID', () =>
       execution_mode: 'managed',
       status: 'succeeded',
       target_notional: '2000',
+      target_leg_weights: ['1', '1'],
       created_at: '2026-11-04T02:00:00Z',
       legs: [{
         coin: 'HYPE', position_side: 'long', action: 'buy', reduce_only: false,
@@ -351,7 +362,7 @@ test('交易历史位于详情页底部并展示两腿成交与订单 ID', () =>
   const html = renderDetail(qc, value.pair.id);
 
   assert.match(html, /交易历史/);
-  assert.match(html, /每腿目标/);
+  assert.match(html, /基准目标/);
   assert.match(html, /40\.5/);
   assert.match(html, /\+0\.2500% · \+1\.25 USD（不利）/);
   assert.match(html, /12345/);
@@ -372,6 +383,7 @@ test('交易历史将未完成动作中的未发送腿显示为未发送', () =>
       execution_mode: 'managed',
       status: 'incomplete',
       target_notional: '2000',
+      target_leg_weights: ['1', '1'],
       created_at: '2026-11-12T07:02:25Z',
       legs: [{
         coin: 'xyz:NBIS', position_side: 'long', action: 'buy', reduce_only: false,

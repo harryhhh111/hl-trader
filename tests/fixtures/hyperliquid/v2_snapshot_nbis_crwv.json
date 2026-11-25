@@ -12,6 +12,7 @@
             "xyz:CRWV"
         ],
         "account_address": "0x0000000000000000000000000000000000000043",
+        "target_leg_weights": ["1", "1"],
         "unlocks_enabled": false
     },
     "blocks": {

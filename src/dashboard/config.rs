@@ -12,12 +12,17 @@ use std::fmt;
 use std::path::Path;
 
 use hypersdk::Address;
+use rust_decimal::Decimal;
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::Digest;
 
 pub const CONFIG_VERSION: u64 = 1;
+
+pub fn default_target_leg_weights() -> [Decimal; 2] {
+    [Decimal::ONE, Decimal::ONE]
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -59,6 +64,7 @@ pub struct PairDescriptor {
     pub dex: String,
     pub coins: [String; 2],
     pub account_address: Option<String>,
+    pub target_leg_weights: [Decimal; 2],
     pub unlocks_enabled: bool,
 }
 
@@ -237,6 +243,8 @@ struct PairConfigRaw {
     // 用 Value 接收以区分「缺失（错误）」与「显式 null（不适用）」：
     // Option 字段缺失会被 serde 静默补成 None。
     account_address: serde_json::Value,
+    #[serde(default)]
+    target_leg_weights: Option<[String; 2]>,
     unlock_anchors: serde_json::Value,
 }
 
@@ -251,6 +259,7 @@ fn validate_pair(raw: PairConfigRaw) -> Result<DashboardPair, ConfigError> {
         dex,
         coins,
         account_address,
+        target_leg_weights,
         unlock_anchors,
     } = raw;
     if !valid_pair_id(&id) {
@@ -284,6 +293,26 @@ fn validate_pair(raw: PairConfigRaw) -> Result<DashboardPair, ConfigError> {
     if coins[0] == coins[1] {
         return Err(ConfigError::Invalid(format!(
             "pair \"{id}\" 的两腿合约必须不同"
+        )));
+    }
+    let parse_weight = |value: &str| {
+        value.parse::<Decimal>().map_err(|error| {
+            ConfigError::Invalid(format!(
+                "pair \"{id}\" 的 target_leg_weights 含非法十进制数: {error}"
+            ))
+        })
+    };
+    let target_leg_weights = match target_leg_weights {
+        Some(values) => [parse_weight(&values[0])?, parse_weight(&values[1])?],
+        None => default_target_leg_weights(),
+    };
+    if target_leg_weights
+        .iter()
+        .any(|weight| *weight <= Decimal::ZERO || *weight > Decimal::ONE)
+        || !target_leg_weights.contains(&Decimal::ONE)
+    {
+        return Err(ConfigError::Invalid(format!(
+            "pair \"{id}\" 的 target_leg_weights 必须在 (0, 1] 内，且至少一腿为 1"
         )));
     }
     let account_address = match &account_address {
@@ -338,6 +367,7 @@ fn validate_pair(raw: PairConfigRaw) -> Result<DashboardPair, ConfigError> {
             dex,
             coins,
             account_address,
+            target_leg_weights,
             unlocks_enabled: unlock_anchors.is_some(),
         },
         enabled,
@@ -419,6 +449,10 @@ mod tests {
         assert_eq!(hype.descriptor.network, Network::Mainnet);
         assert!(hype.descriptor.account_address.is_none());
         assert!(hype.descriptor.unlocks_enabled);
+        assert_eq!(
+            hype.descriptor.target_leg_weights,
+            [Decimal::ONE, Decimal::ONE]
+        );
         let nbis = &cfg.pairs[1];
         assert_eq!(
             nbis.descriptor.account_address.as_deref(),
@@ -429,6 +463,28 @@ mod tests {
         assert!(nbis.unlock_anchors.is_none());
         assert!(cfg.enabled_pair("hype-btc").is_some());
         assert!(cfg.enabled_pair("missing").is_none());
+    }
+
+    #[test]
+    fn target_leg_weights_are_optional_normalized_and_bounded() {
+        let text = VALID.replace(
+            "\"coins\": [\"xyz:NBIS\", \"xyz:CRWV\"],",
+            "\"coins\": [\"xyz:NBIS\", \"xyz:CRWV\"], \"target_leg_weights\": [\"0.8\", \"1\"],",
+        );
+        let cfg = load_str(&text).unwrap();
+        assert_eq!(
+            cfg.pairs[1].descriptor.target_leg_weights,
+            [Decimal::new(8, 1), Decimal::ONE]
+        );
+        for weights in ["[\"0\", \"1\"]", "[\"1.1\", \"1\"]", "[\"0.8\", \"0.9\"]"] {
+            let bad = VALID.replace(
+                "\"coins\": [\"xyz:NBIS\", \"xyz:CRWV\"],",
+                &format!(
+                    "\"coins\": [\"xyz:NBIS\", \"xyz:CRWV\"], \"target_leg_weights\": {weights},"
+                ),
+            );
+            assert!(matches!(load_str(&bad), Err(ConfigError::Invalid(_))));
+        }
     }
 
     #[test]

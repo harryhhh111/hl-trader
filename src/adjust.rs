@@ -105,6 +105,8 @@ pub struct AdjustmentReport {
     pub config_revision: String,
     pub account_address: String,
     pub target_notional: Decimal,
+    #[serde(default = "config::default_target_leg_weights")]
+    pub target_leg_weights: [Decimal; 2],
     #[serde(default)]
     pub max_slippage_bps: u32,
     #[serde(default = "default_leg_indices")]
@@ -388,16 +390,16 @@ async fn build_plan(
     if !request.leg_indices.contains(&true) {
         return Err(AdjustError::Refused("至少选择一条调仓腿".into()));
     }
-    if request.target_notional < Decimal::ZERO
-        || (request.target_notional > Decimal::ZERO && request.target_notional < Decimal::TEN)
-        || request.target_notional > request.max_notional
-    {
+    if request.target_notional < Decimal::ZERO || request.target_notional > request.max_notional {
         return Err(AdjustError::Refused(format!(
-            "每腿目标名义必须为 0 或不小于 10 USD，且不能超过上限 {} USD",
+            "基准目标名义必须在 0 到 {} USD 之间",
             request.max_notional
         )));
     }
     let descriptor = &request.pair.descriptor;
+    let target_notionals = descriptor
+        .target_leg_weights
+        .map(|weight| request.target_notional * weight);
     let dex = (!descriptor.dex.is_empty()).then_some(descriptor.dex.as_str());
     let account = adapter.account_for(request.account, dex).await?;
     let coins = &descriptor.coins;
@@ -436,13 +438,20 @@ async fn build_plan(
         let current_signed = start_positions[index];
         let current_size = current_signed.abs();
         let selected = request.leg_indices[index];
+        let target_notional = target_notionals[index];
+        if selected && target_notional > Decimal::ZERO && target_notional < Decimal::TEN {
+            return Err(AdjustError::Refused(format!(
+                "{} 按目标权重计算的名义低于 10 USD",
+                market.name
+            )));
+        }
         let target_size = if selected {
-            pair::floor_qty(request.target_notional / mid, market.sz_decimals)
+            pair::floor_qty(target_notional / mid, market.sz_decimals)
         } else {
             current_size
         };
         if selected
-            && request.target_notional > Decimal::ZERO
+            && target_notional > Decimal::ZERO
             && (target_size <= Decimal::ZERO || target_size * mid < Decimal::TEN)
         {
             return Err(AdjustError::Refused(format!(
@@ -531,7 +540,10 @@ async fn build_plan(
         AdjustmentStatus::Preview
     };
     let diagnostics = [
-        "目标为每腿绝对名义；数量按市场精度向下取整，实际成交名义可能略有差异".into(),
+        format!(
+            "每腿目标名义 = 基准目标 × 配置权重（{}: {}，{}: {}）；数量按市场精度向下取整",
+            coins[0], descriptor.target_leg_weights[0], coins[1], descriptor.target_leg_weights[1]
+        ),
         "IOC 未全部成交、拒单或结果未知时停止后续写操作，不自动追单或反向补偿".into(),
     ]
     .into_iter()
@@ -548,6 +560,7 @@ async fn build_plan(
             config_revision: request.config_revision.into(),
             account_address: format!("{}", request.account).to_lowercase(),
             target_notional: request.target_notional,
+            target_leg_weights: descriptor.target_leg_weights,
             max_slippage_bps: request.max_slippage_bps,
             leg_indices: selected_leg_indices(request),
             created_at: now_utc(),
@@ -1077,6 +1090,7 @@ pub async fn submit_browser_adjustment(
         || report.leg_indices != selected_leg_indices(request)
         || report.max_slippage_bps != request.max_slippage_bps
         || report.target_notional != request.target_notional
+        || report.target_leg_weights != request.pair.descriptor.target_leg_weights
     {
         return Err(AdjustError::Refused(
             "调仓动作身份或状态已变化，请重新预览并签名".into(),
@@ -1746,6 +1760,35 @@ mod tests {
         assert!(report.legs.iter().all(|leg| leg.cloid.is_none()));
         assert_eq!(exchange.calls(), 0);
         assert!(!fixture.state_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn preview_applies_pair_target_leg_weights_in_coin_order() {
+        let (server, mut fixture) = setup(vec![account("0", "0")]).await;
+        fixture.pair.descriptor.target_leg_weights = [Decimal::new(8, 1), Decimal::ONE];
+        let report = run_adjust(
+            &Adapter::with_base_url(&server.base_url()),
+            None,
+            &fixture.request(),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.target_notional, Decimal::new(2000, 0));
+        assert_eq!(
+            report.target_leg_weights,
+            [Decimal::new(8, 1), Decimal::ONE]
+        );
+        assert_eq!(report.legs[0].target_size, Decimal::new(160, 0));
+        assert_eq!(report.legs[1].target_size, Decimal::new(40, 0));
+        assert_eq!(
+            report.legs[0].estimated_target_notional,
+            Decimal::new(1600, 0)
+        );
+        assert_eq!(
+            report.legs[1].estimated_target_notional,
+            Decimal::new(2000, 0)
+        );
     }
 
     #[tokio::test]

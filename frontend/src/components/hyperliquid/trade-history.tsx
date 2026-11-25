@@ -77,7 +77,7 @@ export function TradeHistory({ pairId, accountAddress }: {
                   ? 'bg-amber-500/10 text-amber-600' : 'bg-sky-500/10 text-sky-600'}>
                 {STATUS_LABEL[item.status]}
               </Badge>
-              <span>每腿目标 <span className="font-mono">{item.target_notional} USD</span></span>
+              <span>基准目标 <span className="font-mono">{item.target_notional} USD</span>（{(item.target_leg_weights ?? ['1', '1']).join(':')}）</span>
               <span className="text-xs text-muted-foreground">{MODE_LABEL[item.execution_mode]}</span>
             </div>
             <div className="overflow-x-auto">

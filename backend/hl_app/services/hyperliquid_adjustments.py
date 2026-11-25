@@ -102,6 +102,10 @@ def _parse_report(
         or report.get("account_address") != account
         or report.get("config_revision") != (config_revision or pairs_service.load_pairs()[0])
         or _decimal_arg(_decimal(str(report.get("target_notional", "")), "目标名义")) != _decimal_arg(target)
+        or not pairs_service._target_weights_match(
+            report.get("target_leg_weights", list(pairs_service.DEFAULT_TARGET_LEG_WEIGHTS)),
+            descriptor["target_leg_weights"],
+        )
         or report.get("leg_indices", [0, 1]) != selected
         or not isinstance(report.get("legs"), list)
         or len(report["legs"]) != 2
@@ -194,9 +198,9 @@ def preview(
     max_slippage_bps: int = 5,
 ) -> dict:
     max_slippage_bps = _slippage(max_slippage_bps)
-    target = _decimal(target_notional, "每腿目标名义")
+    target = _decimal(target_notional, "基准目标名义")
     if target < 0 or target > Decimal("1000000"):
-        raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+        raise AdjustmentError(422, "基准目标名义必须在 0 到 1000000 USD 之间")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     if selected == [0, 1]:
@@ -221,11 +225,11 @@ def execute(
     max_slippage_bps: int = 5,
 ) -> dict:
     max_slippage_bps = _slippage(max_slippage_bps)
-    target = _decimal(target_notional, "每腿目标名义")
+    target = _decimal(target_notional, "基准目标名义")
     if target < 0 or target > Decimal("1000000"):
-        raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+        raise AdjustmentError(422, "基准目标名义必须在 0 到 1000000 USD 之间")
     if confirmation.strip() != _decimal_arg(target):
-        raise AdjustmentError(422, "确认金额必须与每腿目标名义完全一致")
+        raise AdjustmentError(422, "确认金额必须与基准目标名义完全一致")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     try:
@@ -255,9 +259,9 @@ def prepare_browser(
     max_slippage_bps: int = 5,
 ) -> dict:
     max_slippage_bps = _slippage(max_slippage_bps)
-    target = _decimal(target_notional, "每腿目标名义")
+    target = _decimal(target_notional, "基准目标名义")
     if target < 0 or target > Decimal("1000000"):
-        raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+        raise AdjustmentError(422, "基准目标名义必须在 0 到 1000000 USD 之间")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)
@@ -308,9 +312,9 @@ def submit_browser(
     max_slippage_bps: int = 5,
 ) -> dict:
     max_slippage_bps = _slippage(max_slippage_bps)
-    target = _decimal(target_notional, "每腿目标名义")
+    target = _decimal(target_notional, "基准目标名义")
     if target < 0 or target > Decimal("1000000"):
-        raise AdjustmentError(422, "每腿目标名义必须在 0 到 1000000 USD 之间")
+        raise AdjustmentError(422, "基准目标名义必须在 0 到 1000000 USD 之间")
     selected = _leg_indices(leg_indices)
     descriptor, account = _resolve(url, pair_id, account_address, config_revision, owner_account_id)
     signer = _browser_signer(account, expected_signer)

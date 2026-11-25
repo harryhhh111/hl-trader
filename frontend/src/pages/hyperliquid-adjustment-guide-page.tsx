@@ -8,9 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 const steps = [
   ['选择 pair 和账户', '进入 NBIS / CRWV 详情页，在“账户配置”中确认当前账户。调仓只作用于这个账户的两腿仓位。'],
   ['检查模式和杠杆', '查看两腿下单前检查：支持全仓的合约须使用 Cross，设置杠杆最高 3x。仅支持逐仓的市场允许例外。可先手动调杠杆并确认，修改后重新预览；读取失败禁止增仓，纯减仓和平仓仍可操作。3x 为逐合约设置上限，不代表账户有效杠杆。'],
-  ['填写每腿目标名义', '例如输入 2000，表示 NBIS 和 CRWV 各以 2000 USD 为目标，不是两腿合计 2000 USD。'],
+  ['填写基准目标名义', '默认 Pair 的权重为 1:1，例如输入 2000，表示 NBIS 和 CRWV 各以 2000 USD 为目标。MU / SNDK 的权重为 0.8:1，输入 2000 时目标分别为 1600 和 2000 USD；不是两腿合计 2000 USD。'],
   ['先预览差额', '系统重新读取实际仓位和盘口，展示买卖方向、数量与保护价。弹窗每 5 秒更新只读盘口；买卖价超出保护价后需重新预览，预览不会读取私钥或发送订单。'],
-  ['确认托管钱包', '调仓默认使用账户配置中的托管 API Wallet。未配置时先在账户配置中添加；预览后输入目标金额，人工确认执行。'],
+  ['确认托管钱包', '调仓默认使用账户配置中的托管 API Wallet。未配置时先在账户配置中添加；预览后输入基准目标金额，人工确认执行。'],
   ['核对结果与历史', '查看每条腿的成交结果、成交均价、相对预览中间价的滑点和最终仓位。页面会刷新只读快照，底部“交易历史”保留本系统调仓的目标、两腿订单和执行状态；实际成交记录以交易所为准。'],
 ];
 
@@ -44,13 +44,13 @@ export function HyperliquidAdjustmentGuidePage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">目标名义与差额</CardTitle>
-          <CardDescription>目标是每腿的绝对名义，系统只交易差额；默认方向为第一腿多、第二腿空。</CardDescription>
+          <CardDescription>基准目标按 Pair 配置权重换算为每腿绝对名义，系统只交易差额；默认方向为第一腿多、第二腿空。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="overflow-x-auto">
             <table className="w-full whitespace-nowrap">
               <thead><tr className="border-b text-left text-xs text-muted-foreground">
-                {['当前每腿名义', '设置目标', '系统行为'].map((heading) => <th key={heading} className="py-2 pr-4">{heading}</th>)}
+                {['当前每腿名义', '设置基准目标（1:1 示例）', '系统行为'].map((heading) => <th key={heading} className="py-2 pr-4">{heading}</th>)}
               </tr></thead>
               <tbody>
                 {[

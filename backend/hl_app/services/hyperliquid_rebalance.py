@@ -171,7 +171,7 @@ def save_rule(
 ) -> dict:
     if type(enabled) is not bool:
         raise RebalanceError(422, "enabled 必须是布尔值")
-    target = _positive_decimal(target_notional, "每腿目标名义", Decimal("1000000"))
+    target = _positive_decimal(target_notional, "基准目标名义", Decimal("1000000"))
     threshold = _positive_decimal(threshold_pct, "偏离阈值", Decimal("100"))
     descriptor, account = adjustments_service._resolve(
         url, pair_id, account_address, config_revision, owner_account_id,
@@ -264,6 +264,10 @@ def evaluate_snapshot(snapshot: dict, rule: dict, now: datetime | None = None) -
         or pair.get("id") != rule["pair_id"] or pair.get("network") != rule["network"]
         or pair.get("dex") != descriptor["dex"] or pair.get("coins") != descriptor["coins"]
         or str(pair.get("account_address") or "").lower() != rule["account_address"]
+        or not pairs_service._target_weights_match(
+            pair.get("target_leg_weights", list(pairs_service.DEFAULT_TARGET_LEG_WEIGHTS)),
+            descriptor["target_leg_weights"],
+        )
     ):
         raise RebalanceError(503, "监控快照身份或配置版本不一致")
     queried_at = _parse_time(snapshot["queried_at"])
@@ -299,9 +303,11 @@ def evaluate_snapshot(snapshot: dict, rule: dict, now: datetime | None = None) -
             raise RebalanceError(503, "现有方向不符合 pair 多空约束，本次不生成候选")
         by_coin[coin] = parsed
     target = Decimal(rule["target_notional"])
+    targets = [target * Decimal(weight) for weight in descriptor["target_leg_weights"]]
     threshold = Decimal(rule["threshold_pct"])
     notionals = [by_coin.get(coin, Decimal("0")) for coin in descriptor["coins"]]
-    drifts = [abs(value - target) / target * Decimal("100") for value in notionals]
+    drifts = [abs(value - leg_target) / leg_target * Decimal("100")
+              for value, leg_target in zip(notionals, targets)]
     observed = [] if position_state == "flat" else [
         index for index, drift in enumerate(drifts) if drift >= threshold
     ]

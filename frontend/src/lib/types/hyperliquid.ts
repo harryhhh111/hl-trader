@@ -103,6 +103,7 @@ export interface HlPairDescriptor {
   dex: string;
   coins: [string, string];
   account_address: string | null;
+  target_leg_weights: [string, string];
   unlocks_enabled: boolean;
 }
 
@@ -425,6 +426,7 @@ export interface HlAdjustmentReport {
   config_revision: string;
   account_address: string;
   target_notional: string;
+  target_leg_weights?: [string, string];
   max_slippage_bps?: number;
   leg_indices?: number[];
   created_at: string;
@@ -484,6 +486,7 @@ export interface HlTradeHistoryItem {
   execution_mode: 'managed' | 'browser' | 'server';
   status: HlTradeHistoryStatus;
   target_notional: string;
+  target_leg_weights?: [string, string];
   created_at: string;
   legs: HlTradeHistoryLeg[];
   diagnostics: string[];

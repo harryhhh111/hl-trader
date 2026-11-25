@@ -131,7 +131,8 @@ function DetailBody({ snapshot, configRevision }: { snapshot: HlPairSnapshot; co
             </span>
             <span>两腿盈亏合计 <span className="font-mono">{signed(positions.unrealized_pnl)}</span></span>
             <span>名义比 <span className="font-mono">{dash(positions.notional_ratio)}</span></span>
-            <span>差异 <span className="font-mono">{pctFromNumber(positions.ratio_drift_pct)}</span></span>
+            <span>目标名义比 <span className="font-mono">{first}:{second} = {descriptor.target_leg_weights[0]}:{descriptor.target_leg_weights[1]}</span></span>
+            <span>比例差异 <span className="font-mono">{pctFromNumber(positions.ratio_drift_pct)}</span></span>
             <span>最新收盘比价 <span className="font-mono">{significantDigits(ratio.latest_close)}</span></span>
             <span>30MA <span className="font-mono">{significantDigits(ratio.ma30)}</span>
               {ratio.vs_ma30_pct != null && <span>（{signed(ratio.vs_ma30_pct)}%）</span>}

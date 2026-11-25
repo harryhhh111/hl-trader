@@ -37,9 +37,9 @@ test("默认托管、金额确认及原请求轮询，不提供浏览器钱包�
   await dialog.getByRole("button", { name: "预览调仓差额" }).click();
   const execute = dialog.getByRole("button", { name: "使用托管钱包下单" });
   await expect(execute).toBeDisabled();
-  await dialog.getByLabel("确认目标金额", { exact: true }).fill("1999");
+  await dialog.getByLabel("确认基准目标金额", { exact: true }).fill("1999");
   await expect(execute).toBeDisabled();
-  await dialog.getByLabel("确认目标金额", { exact: true }).fill("2000");
+  await dialog.getByLabel("确认基准目标金额", { exact: true }).fill("2000");
   await execute.click();
   await expect(dialog.getByText("调仓已完成", { exact: true })).toBeVisible({ timeout: 8000 });
   expect(executionBody.request_id).toBe(previewBody.request_id);

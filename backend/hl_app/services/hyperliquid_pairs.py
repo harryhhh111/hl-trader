@@ -28,7 +28,9 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 TOP_KEYS = {"config_version", "pairs"}
 PAIR_KEYS = {"id", "label", "enabled", "network", "dex", "coins",
-             "account_address", "unlock_anchors"}
+             "account_address", "target_leg_weights", "unlock_anchors"}
+REQUIRED_PAIR_KEYS = PAIR_KEYS - {"target_leg_weights"}
+DEFAULT_TARGET_LEG_WEIGHTS = ("1", "1")
 NETWORKS = ("mainnet", "testnet")
 ANCHOR_KEYS = {"date_utc", "label", "source_url", "verified_utc"}
 
@@ -78,14 +80,28 @@ def _validate_anchor(item) -> None:
             _fail(f"unlock_anchors.{key} 必须是 YYYY-MM-DD")
 
 
+def _target_leg_weights(value) -> list[str]:
+    if (not isinstance(value, list) or len(value) != 2
+            or not all(isinstance(item, str) for item in value)):
+        _fail("target_leg_weights 必须是两个十进制字符串")
+    try:
+        weights = [Decimal(item) for item in value]
+    except InvalidOperation:
+        _fail("target_leg_weights 必须是两个十进制字符串")
+    if (any(not weight.is_finite() or weight <= 0 or weight > 1 for weight in weights)
+            or Decimal("1") not in weights):
+        _fail("target_leg_weights 必须在 (0, 1] 内，且至少一腿为 1")
+    return [format(weight.normalize(), "f") for weight in weights]
+
+
 def _validate_pair(entry, seen_ids: set) -> tuple[dict, bool]:
     if not isinstance(entry, dict):
         _fail("pairs 条目必须是对象")
     keys = set(entry)
     if keys - PAIR_KEYS:
         _fail(f"pair 含未知字段: {sorted(keys - PAIR_KEYS)}")
-    if PAIR_KEYS - keys:
-        _fail(f"pair 缺少字段: {sorted(PAIR_KEYS - keys)}")
+    if REQUIRED_PAIR_KEYS - keys:
+        _fail(f"pair 缺少字段: {sorted(REQUIRED_PAIR_KEYS - keys)}")
 
     pid = entry["id"]
     if not isinstance(pid, str) or len(pid) > MAX_ID_LEN or not PAIR_ID_RE.fullmatch(pid):
@@ -140,6 +156,8 @@ def _validate_pair(entry, seen_ids: set) -> tuple[dict, bool]:
         "dex": dex,
         "coins": list(coins),
         "account_address": address,
+        "target_leg_weights": _target_leg_weights(
+            entry.get("target_leg_weights", list(DEFAULT_TARGET_LEG_WEIGHTS))),
         "unlocks_enabled": anchors is not None,
     }
     return descriptor, entry["enabled"]
@@ -228,6 +246,19 @@ def _decimal_string(value) -> bool:
 
 def _non_negative_decimal(value) -> bool:
     return _decimal_string(value) and Decimal(value) >= 0
+
+
+def _target_weights_match(value, expected: list[str]) -> bool:
+    if (not isinstance(value, list) or len(value) != 2
+            or not all(isinstance(item, str) for item in value)):
+        return False
+    try:
+        actual = [Decimal(item) for item in value]
+        return (all(weight.is_finite() and 0 < weight <= 1 for weight in actual)
+                and Decimal("1") in actual
+                and actual == [Decimal(item) for item in expected])
+    except InvalidOperation:
+        return False
 
 
 def _timestamp(value) -> bool:
@@ -540,7 +571,11 @@ def _validate_v2_snapshot(snapshot: dict, descriptor: dict, revision: str) -> di
             or pair.get("network") != descriptor["network"]
             or pair.get("dex") != descriptor["dex"]
             or pair.get("coins") != list(descriptor["coins"])
-            or str(pair.get("account_address") or "").lower() != expected_account):
+            or str(pair.get("account_address") or "").lower() != expected_account
+            or not _target_weights_match(
+                pair.get("target_leg_weights", list(DEFAULT_TARGET_LEG_WEIGHTS)),
+                descriptor.get("target_leg_weights", list(DEFAULT_TARGET_LEG_WEIGHTS)),
+            )):
         raise HyperliquidUnavailable(
             "快照 pair 身份与目录不符", public="快照身份与配置不符",
         )

@@ -19,6 +19,7 @@ function snapshot(pairId: string, revision: string): HlPairSnapshot {
       dex: '',
       coins: ['HYPE', 'BTC'],
       account_address: null,
+      target_leg_weights: ['1', '1'],
       unlocks_enabled: false,
     },
   } as HlPairSnapshot;

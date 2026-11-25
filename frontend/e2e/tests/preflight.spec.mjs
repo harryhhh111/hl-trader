@@ -47,7 +47,7 @@ async function setup(page, settings) {
   await page.getByRole('button', { name: '调整仓位', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '调整两腿仓位', exact: true });
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
-  await dialog.getByLabel('确认目标金额', { exact: true }).fill('2000');
+  await dialog.getByLabel('确认基准目标金额', { exact: true }).fill('2000');
   return dialog;
 }
 
@@ -79,7 +79,7 @@ test('超限和逐仓阻止增仓，手动修改遵守 3x 上限并清除旧预�
   // Updated settings can unmount the completed editor when its current-value props refresh.
   if (await editor.count()) await editor.getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
-  await dialog.getByLabel('确认目标金额', { exact: true }).fill('2000');
+  await dialog.getByLabel('确认基准目标金额', { exact: true }).fill('2000');
   await expect(dialog.getByRole('button', { name: '使用托管钱包下单', exact: true })).toBeEnabled();
   expect(changes).toBe(1);
 });
@@ -110,9 +110,9 @@ test('检查失败禁止增仓，但纯减仓预览仍可执行；仅逐仓市�
   await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
   await expect(dialog.getByRole('alert').filter({ hasText: '检查失败' })).toBeVisible();
   await expect(execute).toBeDisabled();
-  await dialog.getByLabel('每腿目标名义').fill('0');
+  await dialog.getByLabel('基准目标名义').fill('0');
   await dialog.getByRole('button', { name: '预览调仓差额' }).click();
-  await dialog.getByLabel('确认目标金额', { exact: true }).fill('0');
+  await dialog.getByLabel('确认基准目标金额', { exact: true }).fill('0');
   await expect(execute).toBeEnabled();
 });
 
