@@ -90,7 +90,7 @@ export function HyperliquidAdjustmentGuidePage() {
             <p><span className="font-medium">调仓预览：</span><span className="text-muted-foreground">只显示计划，尚未下单。</span></p>
             <p><span className="font-medium">调仓已完成：</span><span className="text-muted-foreground">两腿订单均已全部成交，并已核对交易所实际持仓。</span></p>
             <p><span className="font-medium">调仓未完成：</span><span className="text-muted-foreground">发生拒单或部分成交。可以重新预览最新差额，但系统不会自动补单。</span></p>
-            <p><span className="font-medium text-rose-600">调仓结果未知：</span><span className="text-muted-foreground">可能发生超时、断线或持仓核对不一致。禁止直接重试，应记录 action ID 和 cloid，先人工核对交易所订单、成交和实际持仓。</span></p>
+            <p><span className="font-medium text-rose-600">调仓结果未知：</span><span className="text-muted-foreground">可能发生超时、断线或持仓核对不一致。禁止直接重试，应记录 action ID 和 cloid，先人工核对交易所订单、成交和实际持仓。若动作与订单标识均为空，可点击“核对未发送并解除阻塞”；服务端确认没有执行回执后会标为未执行，存在标识或回执时不会开放解除。</span></p>
           </CardContent>
         </Card>
       </div>

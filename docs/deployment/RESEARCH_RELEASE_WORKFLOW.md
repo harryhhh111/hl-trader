@@ -51,7 +51,7 @@ python3 deploy/verify_research_standalone.py \
   --snapshot s7658fcec893ae6e0a4ff5f57acdc32f0 --report-id sndk-main
 ```
 
-发布工具要求线上 Web 与构建记录中的基础镜像一致、候选 CLI 与线上一致、没有运行中的执行请求，先保留回退镜像，再用 `up --no-deps --no-build` 仅替换 Web。gateway 容器保留，重新加载 nginx 配置以解析新 Web 地址；worker 保留。切换后比较配置/挂载、CLI、研究快照及服务状态并记录证据。失败记录不代表已回退，须按 `.before.json` 中的回退标签核对实际状态。
+发布工具要求线上 Web 与构建记录中的基础镜像一致、候选 CLI 与线上一致、没有运行中的执行请求，先保留回退镜像，再用 `up --no-deps --no-build` 仅替换 Web。gateway 和 worker 容器保留。当前 gateway 配置通过 Docker DNS 在请求时解析新 Web 地址；发布工具仍重新加载 nginx，以兼容旧的静态解析镜像。切换后比较配置/挂载、CLI、研究快照及服务状态并记录证据。失败记录不代表已回退，须按 `.before.json` 中的回退标签核对实际状态。
 
 独立 HTML 核验在容器内创建隔离的 TestClient，使用测试鉴权调用已安装的报告路由，不创建真实账号会话，也不改变线上鉴权；范围是处理函数与挂载文件，不等于公网登录后的浏览器检查。可加 `--record .runtime/deployments/文件名.json` 保存私有证据。
 

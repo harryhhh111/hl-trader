@@ -19,7 +19,7 @@ export function managedReport(body, overrides = {}) {
       coin, position_side: index ? "short" : "long", current_size: "0", current_notional: "0",
       target_size: "20", estimated_target_notional: body.target_notional, action: index ? "sell" : "buy",
       reduce_only: false, order_qty: "1", mid_px: "100", protect_px: index ? "99.95" : "100.05",
-      status: "prepared", confirmed_qty: "0", avg_px: null, oid: null, result: null,
+      status: "prepared", confirmed_qty: "0", avg_px: null, nonce: null, cloid: null, oid: null, result: null,
       final_size: null, final_notional: null,
     })), diagnostics: [], ...overrides,
   };

@@ -72,7 +72,10 @@ def report(revision: str, request_id: str, status="succeeded") -> dict:
         "target_notional": "2000",
         "max_slippage_bps": 5,
         "created_at": "2026-11-04T00:00:00Z",
-        "legs": [{"coin": "xyz:NBIS"}, {"coin": "xyz:CRWV"}],
+        "legs": [
+            {"coin": "xyz:NBIS", "status": "prepared", "confirmed_qty": "0", "cloid": None, "nonce": None, "oid": None},
+            {"coin": "xyz:CRWV", "status": "prepared", "confirmed_qty": "0", "cloid": None, "nonce": None, "oid": None},
+        ],
         "diagnostics": [],
     }
 
@@ -141,7 +144,8 @@ def test_managed_request_id_cannot_change_leg_scope(ready, monkeypatch) -> None:
         execute(ready, request_id)
 
 
-def test_unknown_blocks_new_execution_and_wallet_mutation(ready, monkeypatch) -> None:
+def test_unknown_blocks_new_execution_and_wallet_mutation(ready, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("HL_APP_EXECUTION_STATE_DIR", str(tmp_path / "state"))
     request_id = str(uuid.uuid4())
     monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
     preview(ready, request_id)
@@ -157,6 +161,40 @@ def test_unknown_blocks_new_execution_and_wallet_mutation(ready, monkeypatch) ->
         )
     with pytest.raises(wallets.WalletError, match="执行中或待核对"):
         preview(ready, str(uuid.uuid4()))
+
+    resolved = managed.resolve_not_sent(ready.runtime_url, "nbis-crwv", request_id)
+    assert resolved["managed_status"] == "failed"
+    assert resolved["error_code"] == "not_sent_confirmed"
+    assert managed.resolve_not_sent(ready.runtime_url, "nbis-crwv", request_id) == resolved
+    assert preview(ready, str(uuid.uuid4()))["managed_status"] == "previewed"
+
+
+def test_resolve_not_sent_refuses_execution_receipt(ready, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("HL_APP_EXECUTION_STATE_DIR", str(tmp_path / "state"))
+    request_id = str(uuid.uuid4())
+    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
+    preview(ready, request_id)
+    monkeypatch.setattr(
+        managed.adjustments, "_invoke",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(managed.adjustments.AdjustmentError(503, "结果未知")),
+    )
+    execute(ready, request_id)
+    directory = tmp_path / "state" / "nbis-crwv" / ADDRESS_LOWER
+    directory.mkdir(parents=True)
+    (directory / "adjust-state.json").write_text(json.dumps({"request_id": request_id}), encoding="utf-8")
+    with pytest.raises(wallets.WalletError, match="执行回执"):
+        managed.resolve_not_sent(ready.runtime_url, "nbis-crwv", request_id)
+
+
+def test_resolve_not_sent_refuses_action_id(ready, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("HL_APP_EXECUTION_STATE_DIR", str(tmp_path / "state"))
+    request_id = str(uuid.uuid4())
+    monkeypatch.setattr(managed.adjustments, "preview", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "preview"))
+    preview(ready, request_id)
+    monkeypatch.setattr(managed.adjustments, "_invoke", lambda *_args, **_kwargs: report(pairs.load_pairs()[0], request_id, "unknown"))
+    assert execute(ready, request_id)["managed_status"] == "unknown"
+    with pytest.raises(wallets.WalletError, match="动作 ID"):
+        managed.resolve_not_sent(ready.runtime_url, "nbis-crwv", request_id)
 
 
 def test_offline_key_rotation_dry_run_and_apply(ready, monkeypatch, tmp_path) -> None:

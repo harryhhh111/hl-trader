@@ -1,6 +1,6 @@
 # 项目功能与验收状态
 
-核对日期：2026-11-20。本页区分当前代码、回归和实际部署证据；真实订单仍需独立验收。本轮源码归档、运行模块对照与验证结果见[交付基线](deployment/RELEASE_BASELINE_2026_11_20.md)。
+核对日期：2026-11-25。本页区分当前代码、回归和实际部署证据；真实订单仍需独立验收。早期源码归档、运行模块对照与验证结果见[交付基线](deployment/RELEASE_BASELINE_2026_11_20.md)，后续变更以各自部署记录和本页核对日期为准。
 
 ## 已实现的能力
 
@@ -12,7 +12,9 @@
 | 统一账户权益与比价展示 | Unified / Portfolio 模式读取账户级 portfolio 权益，失败时保留独立仓位并降级权益字段；比价和 30MA 使用五位有效数字。11 月 19 日执行器升级覆盖权益修复的问题已于 2026-11-20 经授权修复部署；HYPE/BTC、NBIS/CRWV 真实公开账户只读核验均返回 account=ok、账户总权益和完整来源键 | `72f3d36`；[权益修复部署记录](deployment/ACCOUNT_EQUITY_2026_11_20.md) |
 | 账号注册与登录 | `account` 模式提供邮箱密码注册/登录，Hyperliquid 资源接入用户归属；另保留 token 和 Cloudflare Access 模式 | `0c516bb`；认证异常不回退 token 表单的修复为 `d030122` |
 | 更新日志 | `/changelog` 展示人工维护的发布说明；页面条目不是完整 Git 提交清单 | `cb3cc0e` |
-| 开发验证环境 | 提供 `make test-fast/test-db/test-e2e/verify`；E2E 固定 UTF-8、当前源码和非 root 镜像，Rust 工具链与 Docker Cargo 使用持久缓存 | [运行手册](deployment/INDEPENDENT_APP.md#4-标准验证) |
+| 开发验证环境 | 提供 `make test-fast/test-db/test-e2e/test-gateway/verify`；E2E 固定 UTF-8、当前源码和非 root 镜像，Rust 工具链与 Docker Cargo 使用持久缓存 | [运行手册](deployment/INDEPENDENT_APP.md#4-标准验证) |
+| Gateway 动态解析 Web 地址 | nginx 通过 Docker DNS 在请求时解析 Web，缓存 5 秒；Web 重建换 IP 后不再依赖人工 reload。2026-11-25 已部署；隔离测试验证 gateway 不 reload 自动跟随 Web 新地址 | `deploy/docker/nginx.conf`、`make test-gateway`；`.runtime/deployments/manual-recovery-20261125T162003Z.deployed.json` |
+| 发送前未知调仓恢复 | 托管请求只有在动作/订单标识为空、两腿未发送且没有匹配执行回执时，才允许“核对未发送并解除阻塞”；有真实标识或回执仍需人工核对。2026-11-25 已部署并将历史阻塞记录标为 `failed/not_sent_confirmed`，真实只读预览恢复，未发送订单 | `resolve-not-sent`；后端 322 项离线＋102 项数据库测试，Chromium 78 项通过、2 项跳过；同上部署证据 |
 | 小额调仓差额处理 | 某腿保护价名义不足 10 USD 时跳过并提示，不再阻止另一腿符合条件的订单 | `9e3ad44` |
 | Pair 止盈止损 | 两腿当前未实现盈亏合计、USD 阈值、只读 worker、页面触发提醒和人工确认平仓；规则与事件按用户、pair 和账户关联 | `87ffcd8`；[风险监控说明](HYPERLIQUID_PAIR_RISK_AUTOMATION.md) |
 | 杠杆与增仓前检查 | 显示并手动调整逐合约 Cross / isolated 和 1–3x；增仓在签名、提交及逐腿发送前重读设置，纯减仓和平仓不被该检查阻塞 | `5b9dbcc`、`950e9a4`；[保证金模式说明](HYPERLIQUID_MARGIN_MODES.md) |

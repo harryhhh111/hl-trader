@@ -77,3 +77,38 @@ test("打开弹框恢复已有执行请求，只查询原请求不重新提交",
   await expect(dialog.getByText("调仓已完成", { exact: true })).toBeVisible({ timeout: 8000 });
   expect(lookups).toBeGreaterThanOrEqual(2); expect(writes).toBe(0);
 });
+
+test("发送前结果未知可核对未发送、解除阻塞并重新预览", async ({ page }) => {
+  const requestId = "00000000-0000-4000-8000-000000000004";
+  let activeExecution = { request_id: requestId, status: "unknown" };
+  let resolved = false;
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/api-wallet?*", route => reply(route, {
+    configured: true, network: "mainnet", pair_id: "nbis-crwv",
+    account_address: "0x0000000000000000000000000000000000000043",
+    wallet_address: "0x1111111111111111111111111111111111111111", wallet_version: 1,
+    active_execution: activeExecution,
+  }));
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-executions/**", route => {
+    if (route.request().method() === "POST" && route.request().url().endsWith("/resolve-not-sent")) {
+      resolved = true;
+      activeExecution = null;
+      return reply(route, managedReport({ request_id: requestId }, {
+        status: "incomplete", managed_status: "failed", error_code: "not_sent_confirmed",
+      }));
+    }
+    return reply(route, managedReport({ request_id: requestId }, resolved
+      ? { status: "incomplete", managed_status: "failed", error_code: "not_sent_confirmed" }
+      : { status: "unknown", managed_status: "unknown", error_code: "execution_unresolved" }));
+  });
+  await page.route("**/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-preview", route => {
+    return reply(route, managedReport(route.request().postDataJSON()));
+  });
+
+  const dialog = await open(page);
+  await expect(dialog.getByText("调仓结果未知", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "核对未发送并解除阻塞" }).click();
+  await expect(dialog.getByText("托管调仓未执行", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "预览调仓差额" }).click();
+  await expect(dialog.getByText("调仓预览（未下单）", { exact: true })).toBeVisible();
+  expect(resolved).toBe(true);
+});

@@ -6,6 +6,7 @@ import os
 import subprocess
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 from psycopg2.extras import Json, RealDictCursor
 
@@ -75,6 +76,47 @@ def _view(row: dict) -> dict:
         "error_code": row["error_code"],
     })
     return result
+
+
+def _receipt_exists(pair_id: str, account: str, request_id: str) -> bool:
+    directory = Path(adjustments._state_dir()) / pair_id / account
+    try:
+        paths = [
+            path for path in directory.iterdir()
+            if path.name.startswith("adjust") and path.suffix == ".json"
+        ]
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise wallets.WalletError(503, "执行回执暂不可读取，禁止自动解除核对状态") from exc
+    for path in paths:
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024 * 1024:
+                raise ValueError("invalid execution receipt")
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                raise ValueError("invalid execution receipt")
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise wallets.WalletError(409, "执行回执无法完整核对，禁止自动解除核对状态") from exc
+        if value.get("request_id") == request_id:
+            return True
+    return False
+
+
+def _require_pre_send_unknown(row: dict) -> None:
+    result = row["result"] if isinstance(row["result"], dict) else {}
+    if row["action_id"] or result.get("action_id"):
+        raise wallets.WalletError(409, "该请求已有动作 ID，不能按未发送解除；请按订单回执人工核对")
+    legs = result.get("legs")
+    if not isinstance(legs, list) or len(legs) != 2:
+        raise wallets.WalletError(409, "该请求缺少完整的两腿预览，不能按未发送解除")
+    for leg in legs:
+        if not isinstance(leg, dict) or leg.get("status") not in {"prepared", "not_sent"}:
+            raise wallets.WalletError(409, "该请求已进入订单执行阶段，不能按未发送解除")
+        if any(leg.get(key) is not None for key in ("cloid", "nonce", "oid")):
+            raise wallets.WalletError(409, "该请求已有订单标识，不能按未发送解除；请按订单回执人工核对")
+        if adjustments._decimal(str(leg.get("confirmed_qty", "")), "成交数量") != Decimal("0"):
+            raise wallets.WalletError(409, "该请求已有成交数量，不能按未发送解除")
 
 
 def _matching_existing(row: dict | None, session: SessionInfo, payload_hash: str) -> dict | None:
@@ -175,12 +217,17 @@ def _finish(
     error_code: str | None,
     detail: str | None,
     result: dict | None = None,
+    expected_status: str | None = None,
 ) -> dict:
     with connect(url, cursor_factory=RealDictCursor) as conn:
         with conn.cursor() as cursor:
             row = _request_row(cursor, request_id, lock=True)
             if row is None:
                 raise wallets.WalletError(404, "调仓请求不存在")
+            if expected_status is not None and row["status"] != expected_status:
+                if row["status"] == status and row["error_code"] == error_code:
+                    return _view(row)
+                raise wallets.WalletError(409, "调仓请求状态已变化，请重新读取")
             if result is None:
                 result = dict(row["result"] or {})
             if detail:
@@ -329,6 +376,34 @@ def get_managed_execution(url: str, pair_id: str, request_id: str, owner_account
             if row is None or row["pair_id"] != pair_id or row["network"] != descriptor["network"]:
                 raise wallets.WalletError(404, "调仓请求不存在")
             return _view(row)
+
+
+def resolve_not_sent(url: str, pair_id: str, request_id: str, owner_account_id: int | None = None) -> dict:
+    request_id = _request_id(request_id)
+    _revision, descriptors = pairs_service.load_pairs()
+    descriptor = next((item for item in descriptors if item["id"] == pair_id), None)
+    if descriptor is None:
+        raise wallets.WalletError(404, "未知或停用的 pair")
+    with connect(url, cursor_factory=RealDictCursor) as conn:
+        with conn.cursor() as cursor:
+            row = _request_row(cursor, request_id, lock=True, owner_account_id=owner_account_id)
+            if row is None or row["pair_id"] != pair_id or row["network"] != descriptor["network"]:
+                raise wallets.WalletError(404, "调仓请求不存在")
+            if row["status"] == "failed" and row["error_code"] == "not_sent_confirmed":
+                return _view(row)
+            if row["status"] != "unknown":
+                raise wallets.WalletError(409, "只有待核对请求可以执行未发送核对")
+            _require_pre_send_unknown(row)
+            if _receipt_exists(pair_id, row["account_address"], request_id):
+                raise wallets.WalletError(409, "已找到该请求的执行回执，不能按未发送解除；请按回执人工核对")
+    return _finish(
+        url,
+        request_id,
+        "failed",
+        "not_sent_confirmed",
+        "已核对：未生成 action_id、cloid、nonce 或订单 ID，且不存在该 request_id 的执行回执；按执行器先保存回执、后发送订单的顺序，本次未发送订单，已解除阻塞",
+        expected_status="unknown",
+    )
 
 
 def mark_interrupted_requests(url: str) -> None:

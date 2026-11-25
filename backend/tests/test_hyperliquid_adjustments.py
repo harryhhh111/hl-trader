@@ -187,6 +187,28 @@ def test_http_preview_and_execute_contract(configured, monkeypatch) -> None:
     ).status_code == 422
 
 
+def test_http_resolve_not_sent_contract(configured, monkeypatch) -> None:
+    app = FastAPI()
+    app.state.settings = SimpleNamespace(database_url="postgresql://runtime")
+    app.include_router(hyperliquid.router, prefix="/api/v1")
+    app.dependency_overrides[require_session] = lambda: None
+    client = TestClient(app)
+    request_id = "123e4567-e89b-42d3-a456-426614174000"
+    calls = []
+
+    def resolve(url, pair_id, value, owner):
+        calls.append((url, pair_id, value, owner))
+        return {"request_id": value, "managed_status": "failed", "error_code": "not_sent_confirmed"}
+
+    monkeypatch.setattr(hyperliquid.managed_adjustments_service, "resolve_not_sent", resolve)
+    response = client.post(
+        f"/api/v1/hyperliquid/pairs/nbis-crwv/adjustments/managed-executions/{request_id}/resolve-not-sent"
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["error_code"] == "not_sent_confirmed"
+    assert calls == [("postgresql://runtime", "nbis-crwv", request_id, None)]
+
+
 API_WALLET = "0x1111111111111111111111111111111111111111"
 ACTION_ID = "adjust-0x" + "a" * 32
 SIGNATURE = "0x" + "1" * 130

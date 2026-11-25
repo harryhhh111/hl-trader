@@ -277,7 +277,7 @@ GET  /api/v1/hyperliquid/pairs/{pair_id}/adjustments/managed-executions/{request
 7. Rust 在发送任何订单前，把 request_id、action ID、cloid、两腿意图及配置身份写入现有持久执行状态。这样 Web 或 Python 崩溃后仍能由 request_id 找到回执并核对交易所订单。
 8. 完成后持久化原执行报告、action ID 和结果分类，写 `execute_finished` 并清理运行时缓存。确认尚未发送的授权失败、参数错误或执行器拒绝记为 `failed`；已可能发送但无法确认时才记为 `unknown`。父进程关闭 memfd；子进程结束或强杀后由内核回收剩余 fd。
 9. 请求超时、断线或进程崩溃时状态为 `unknown`，不自动重试、不自动补偿。前端或操作员用原 request_id 查询；Web 重启只把未完成请求标记为未知，不自动恢复发送。
-10. 结果未知时继续阻止该账户的新执行、轮换和删除，直到通过独立核对流程确认订单、成交和实际仓位后显式解除。核对接口只读交易所，不重新发送订单。
+10. 结果未知时继续阻止该账户的新执行、轮换和删除，直到通过独立核对流程确认订单、成交和实际仓位后显式解除。涉及交易所的核对接口只读，不重新发送订单。若 action ID、cloid、nonce、订单 ID 和成交数量均为空，两腿处于 `prepared`／`not_sent`，且没有该 request_id 的执行回执，`POST .../managed-executions/{request_id}/resolve-not-sent` 可按“先保存回执、后发送订单”的执行顺序确认未发送，改为 `failed/not_sent_confirmed` 并写审计；只要有订单标识或匹配回执就拒绝自动解除。
 
 文件签名模式和托管模式分别判断就绪条件：托管模式不要求 `HL_APP_AGENT_SECRET_FILE`，旧文件模式不要求数据库钱包。两者都必须由 `HL_APP_TRADING_ENABLED` 显式开启。
 
@@ -299,7 +299,7 @@ GET  /api/v1/hyperliquid/pairs/{pair_id}/adjustments/managed-executions/{request
 - `使用已托管 API Wallet`：展示服务器端公开地址及版本，确认目标金额后执行。
 - `浏览器签名`：保留当前一次性本地私钥和扩展钱包流程。
 
-账户、pair、网络、配置或钱包版本变化时清除旧预览和 request_id。执行请求超时后保留 request_id 并轮询原状态，不生成新请求；刷新页面后可通过该账户的活动请求恢复进度展示。结果未知时显示 request_id、action ID（若已产生）和“禁止直接重试”。
+账户、pair、网络、配置或钱包版本变化时清除旧预览和 request_id。执行请求超时后保留 request_id 并轮询原状态，不生成新请求；刷新页面后可通过该账户的活动请求恢复进度展示。结果未知时显示 request_id、action ID（若已产生）和“禁止直接重试”。符合第 7 节发送前条件的请求同时显示“核对未发送并解除阻塞”，成功后保留未执行结果并允许重新预览；有真实订单标识或执行回执的未知请求不提供该按钮。
 
 ## 9. Docker 与部署变更
 

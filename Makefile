@@ -3,7 +3,7 @@ WEB_TEST_IMAGE ?= hl-app-web:local
 E2E_IMAGE ?= hl-app-e2e-test:local
 RUST_RUN = docker run --rm -e CARGO_HOME=/work/.runtime/cargo -v hl-trader-rustup:/usr/local/rustup -v $(CURDIR):/work -w /work $(RUST_IMAGE)
 
-.PHONY: test-fast test-rust test-backend test-frontend test-db test-e2e test-image verify test-release-tools research-plan research-verify research-sync-plan research-sync
+.PHONY: test-fast test-rust test-backend test-frontend test-db test-e2e test-gateway test-image verify test-release-tools research-plan research-verify research-sync-plan research-sync
 
 test-fast: test-rust test-backend test-frontend test-release-tools
 
@@ -44,4 +44,7 @@ test-e2e:
 	docker build -f deploy/docker/Dockerfile.e2e -t $(E2E_IMAGE) .
 	docker run --rm -v $(CURDIR):/src:ro $(E2E_IMAGE)
 
-verify: test-fast test-db test-e2e
+test-gateway:
+	sh deploy/docker/test-gateway-resolution.sh
+
+verify: test-fast test-db test-e2e test-gateway

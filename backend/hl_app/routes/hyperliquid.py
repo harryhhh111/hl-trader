@@ -547,6 +547,18 @@ def get_managed_adjustment(pair_id: str, request_id: str, request: Request) -> d
         raise _wallet_error(exc) from exc
 
 
+@router.post("/hyperliquid/pairs/{pair_id}/adjustments/managed-executions/{request_id}/resolve-not-sent")
+def resolve_managed_adjustment_not_sent(pair_id: str, request_id: str, request: Request) -> dict:
+    try:
+        return {"data": managed_adjustments_service.resolve_not_sent(
+            request.app.state.settings.database_url, pair_id, request_id, _owner(request),
+        )}
+    except adjustments_service.AdjustmentError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    except Exception as exc:
+        raise _wallet_error(exc) from exc
+
+
 @router.post("/hyperliquid/pairs/{pair_id}/adjustments/browser-prepare")
 def prepare_browser_adjustment(pair_id: str, body: BrowserAdjustmentPrepare, request: Request) -> dict:
     try:

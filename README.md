@@ -26,7 +26,7 @@ Hyperliquid Rust CLI 与独立 Web 应用：支持主网/测试网多 pair 看�
 
 需要 Python 3.11+、Node.js 22+ 和 PostgreSQL（Docker 示例使用现有 database 的独立 `hl_app` schema）。应用只读取显式 `HL_APP_` 环境配置，不加载旧项目 `.env`。运行、迁移和测试分别使用 `HL_APP_DATABASE_URL`、`HL_APP_MIGRATION_DATABASE_URL`、`HL_APP_TEST_DATABASE_URL`，三者互不回退；示例见 `.env.example`。
 
-容器化开发验证提供统一入口：`make test-fast`（Rust、后端离线、前端）、`make test-db`（一次性 PostgreSQL）、`make test-e2e`（固定 Chromium 镜像）和 `make verify`（全部）。E2E 镜像由 `deploy/docker/Dockerfile.e2e` 构建，固定 UTF-8、非 root 用户和当前源码路径；Rust 使用持久 rustup 卷，Docker release 构建使用 BuildKit Cargo 缓存。首次构建需要下载工具和浏览器，后续复用缓存。
+容器化开发验证提供统一入口：`make test-fast`（Rust、后端离线、前端）、`make test-db`（一次性 PostgreSQL）、`make test-e2e`（固定 Chromium 镜像）、`make test-gateway`（Web 重建后的 gateway 自动恢复）和 `make verify`（全部）。E2E 镜像由 `deploy/docker/Dockerfile.e2e` 构建，固定 UTF-8、非 root 用户和当前源码路径；Rust 使用持久 rustup 卷，Docker release 构建使用 BuildKit Cargo 缓存。首次构建需要下载工具和浏览器，后续复用缓存。
 
 ```sh
 python3 -m venv .venv
@@ -329,6 +329,9 @@ Web 真实执行由浏览器中的 API Wallet 完成：后端生成每腿 Hyperl
 每腿每次动作至多发送一笔 IOC；拒单、部分成交或配置变化会停止后续写操作，不自动追单或反向补偿。
 超时、断线、响应无法识别或成交后持仓核对不一致为 `unknown`，禁止直接重试，必须按 action ID、cloid、
 成交记录和实际持仓人工核对。回执按 pair＋账户隔离，发送前原子落盘，未完成或未知动作会阻止再次提交。
+若托管请求没有 action ID、cloid、nonce、订单 ID 和成交数量，两腿仍未进入发送状态，且服务端找不到该
+request_id 的执行回执，弹窗提供“核对未发送并解除阻塞”。服务端复核这些条件后将请求标为未执行并保留
+审计诊断；只要存在订单标识或匹配回执，就不能用该入口解除，仍须人工核对交易所记录。
 两腿不是原子交易，目标仓位调整不等于无风险或保证完全成交。
 
 pair 语义（详见 docs/archive/PHASE2_PLAN.md §2/§3）：

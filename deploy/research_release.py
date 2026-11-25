@@ -303,8 +303,8 @@ class ResearchRelease:
                 self.run(["docker", "tag", before["web"]["Image"], rollback_tag])
                 self.run(["docker", "tag", candidate, "hl-app-web:local"])
                 self.run(command, capture=False, timeout=240)
-                # nginx resolves the Web name at configuration load time.
-                # Reload workers to resolve the new address, preserving its container.
+                # Current configs resolve Web at request time; retain the reload
+                # for compatibility with older statically resolved gateway images.
                 self.run(["docker", "exec", before["gateway"]["Id"], "nginx", "-t"])
                 self.run(["docker", "exec", before["gateway"]["Id"], "nginx", "-s", "reload"])
                 after = self.capture()

@@ -136,3 +136,6 @@ def test_first_account_claims_existing_resources_and_users_are_isolated(account_
     with pytest.raises(wallets.WalletError) as missing:
         managed.get_managed_execution(namespace.runtime_url, "nbis-crwv", request_id, second_session.account_id)
     assert missing.value.status_code == 404
+    with pytest.raises(wallets.WalletError) as resolve_missing:
+        managed.resolve_not_sent(namespace.runtime_url, "nbis-crwv", request_id, second_session.account_id)
+    assert resolve_missing.value.status_code == 404

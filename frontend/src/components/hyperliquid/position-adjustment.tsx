@@ -91,6 +91,19 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     onSettled: () => setProgress(''),
   });
 
+  const resolveNotSent = useMutation({
+    mutationFn: async () => {
+      if (!report?.request_id) throw new Error('待核对 request_id 缺失');
+      return hyperliquidPairsApi.resolveManagedAdjustmentNotSent(descriptor.id, report.request_id);
+    },
+    onSuccess: async (result) => {
+      setReport(result);
+      setActionError('');
+      await qc.invalidateQueries({ queryKey: ['hl-managed-wallet', descriptor.id, account] });
+      await refreshHyperliquid(qc, descriptor.id);
+    },
+  });
+
   useEffect(() => {
     setOpen(false);
     setTarget(initialTarget);
@@ -100,6 +113,7 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     setProgress('');
     preview.reset();
     managed.reset();
+    resolveNotSent.reset();
   }, [descriptor.id, account, configRevision, initialTarget, legIndices]);
 
   const activeRequest = managedWallet.data?.active_execution;
@@ -140,7 +154,11 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
     setActionError('');
     preview.mutate();
   };
-  const busy = preview.isPending || managed.isPending || report?.managed_status === 'running';
+  const busy = preview.isPending || managed.isPending || resolveNotSent.isPending || report?.managed_status === 'running';
+  const canResolveNotSent = report?.managed_status === 'unknown'
+    && report.action_id == null
+    && report.legs.every((leg) => ['prepared', 'not_sent'].includes(leg.status)
+      && leg.cloid == null && leg.nonce == null && leg.oid == null && Number(leg.confirmed_qty) === 0);
   const isExecutionResult = report != null && (
     !['preview', 'prepared'].includes(report.status)
     || ['failed', 'unknown', 'succeeded', 'incomplete'].includes(report.managed_status ?? '')
@@ -336,7 +354,16 @@ export function PositionAdjustment({ descriptor, configRevision, initialTarget =
               )}
               {progress && <p className="text-sm text-sky-600" role="status">{progress}</p>}
               {actionError && <p className="text-sm text-rose-600" role="alert">{actionError}</p>}
-              {report.status === 'unknown' && <p className="text-sm text-rose-600">禁止直接重试。请先按 request_id、action ID、cloid 和交易所实际持仓人工核对。</p>}
+              {report.status === 'unknown' && <div className="space-y-2 text-sm">
+                <p className="text-rose-600">禁止直接重试。请先按 request_id、action ID、cloid 和交易所实际持仓人工核对。</p>
+                {canResolveNotSent && <div className="space-y-2 rounded-md bg-amber-500/10 p-3">
+                  <p className="text-amber-700">本次动作 ID 和订单标识均为空。服务端可核对是否确实没有执行回执；确认未发送后会标记为未执行并解除阻塞，不会取消或发送任何订单。</p>
+                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => resolveNotSent.mutate()}>
+                    {resolveNotSent.isPending ? '正在核对回执…' : '核对未发送并解除阻塞'}
+                  </Button>
+                  {resolveNotSent.isError && <p className="text-rose-600" role="alert">{errorText(resolveNotSent.error)}</p>}
+                </div>}
+              </div>}
               {report.status === 'incomplete' && report.managed_status !== 'failed' && <p className="text-sm text-amber-600">部分订单未全部成交。可重新预览实际差额，但不会自动补单。</p>}
               {report.managed_status === 'failed' && <p className="text-sm text-amber-600">本次请求在发送前失败，没有执行订单。</p>}
             </div>

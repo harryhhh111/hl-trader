@@ -2,13 +2,14 @@
 
 本文只提供部署准备，不执行部署、重启、生产迁移或真实采集。真实地址、数据库、token、研究资料和公开 pair 配置由用户提供，不写入仓库。
 
-状态核对：2026-11-12。本手册描述当前源码提供的操作方式；历史部署记录不能证明后续功能已上线，当前运行状态须另外核对。功能与历史证据范围见[项目状态](../PROJECT_STATUS.md)。
+状态核对：2026-11-25。本手册描述当前源码提供的操作方式；历史部署记录不能证明后续功能已上线，当前运行状态须另外核对。功能与历史证据范围见[项目状态](../PROJECT_STATUS.md)。
 
 ## 1. 组件与权限
 
 - Rust CLI：原交易功能保留；Web 由服务端选择固定的看板、盘口、调仓、签名准备或地址派生命令及参数数组，不接受任意命令、URL、未经校验的账户或秘密路径。
 - 单 FastAPI 进程：持有固定 Web advisory lock，不建表、不启动采集。禁止多 workers、滚动重叠和容器副本。
 - 单 worker：股票采集/增强、Pair 风险、阈值再平衡和资讯同步共用固定生命周期锁；常驻与 `--once` 互斥。各类任务有独立开关，worker 不持有交易私钥；资讯同步 token 与交易凭据分离。
+- Nginx gateway：通过 Docker 内嵌 DNS `127.0.0.11` 和变量形式的 `proxy_pass` 在请求时解析 Web，地址缓存最多 5 秒。Web 重建换 IP 后无需人工 reload gateway；旧静态解析镜像仍需 reload，必须更新 gateway 镜像后才具备自动恢复能力。
 - PostgreSQL：`HL_APP_DATABASE_URL` 仅运行账号；`HL_APP_MIGRATION_DATABASE_URL` 仅管理进程；`HL_APP_TEST_DATABASE_URL` 仅一次性测试。三者互不回退，Web/worker 不注入迁移账号。
 
 Web 使用无 root 的独立 OS 身份，基础 Compose 不挂载签名秘密；浏览器签名模式由客户端持有私钥，Web 只接收订单签名。托管模式挂载加密密钥并接收浏览器加密后的私钥载荷，执行时在内存中解密并经 memfd 传给 Rust，数据库不保存明文私钥。专用回执卷不能含私钥，旧服务器签名模式需要单独显式启用，且不得使用主钱包私钥。pair JSON、二进制及其可替换父目录对 Web 不可写。生产权限必须用假秘密和临时交易资源验证，不能仅凭命令参数测试宣称隔离通过。
@@ -123,7 +124,7 @@ Docker worker 默认 `HL_APP_RISK_MONITOR_ENABLED=true`、`HL_APP_REBALANCE_MONI
 
 ## 4. 标准验证
 
-仓库根目录可执行 `make test-fast`、`make test-db`、`make test-e2e` 或完整的 `make verify`。E2E 使用 `deploy/docker/Dockerfile.e2e` 固定 UTF-8、非 root 用户、PostgreSQL 和 Chromium；`HL_APP_E2E_PYTHON` 可覆盖 Python 路径。Rust 测试使用持久 `hl-trader-rustup` 卷，生产 Dockerfile 的 Cargo 构建使用 BuildKit 缓存。首次构建仍需下载依赖；缓存、测试镜像或临时数据库不得包含生产凭据。
+仓库根目录可执行 `make test-fast`、`make test-db`、`make test-e2e`、`make test-gateway` 或完整的 `make verify`。E2E 使用 `deploy/docker/Dockerfile.e2e` 固定 UTF-8、非 root 用户、PostgreSQL 和 Chromium；`HL_APP_E2E_PYTHON` 可覆盖 Python 路径。`make test-gateway` 在独立 Docker 网络内把 Web 换到不同 IP，不 reload gateway，验证代理会自动恢复；临时容器和网络自动清理，不接触运行中的服务。Rust 测试使用持久 `hl-trader-rustup` 卷，生产 Dockerfile 的 Cargo 构建使用 BuildKit 缓存。首次构建仍需下载依赖；缓存、测试镜像或临时数据库不得包含生产凭据。
 
 `make test-rust` 先执行 `cargo clean --package hl-trader --profile dev`，仅重建本 crate 的开发产物，保留依赖和 release 缓存。隔离发布构建与工作区曾共用 target，旧 crate 产物可能被复用；不能仅凭历史测试数量或旧二进制退出码认定当前源码已验证。
 

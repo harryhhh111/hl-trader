@@ -292,6 +292,10 @@ export const hyperliquidPairsApi = {
   managedAdjustment: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
   ),
+  resolveManagedAdjustmentNotSent: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlAdjustmentReport>(
+    `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}/resolve-not-sent`,
+    { method: "POST" },
+  ),
   managedLeverage: (pairId: string, requestId: string) => apiFetch<import("@/lib/types/hyperliquid").HlLeverageReport>(
     `/api/v1/hyperliquid/pairs/${encodeURIComponent(pairId)}/adjustments/managed-executions/${encodeURIComponent(requestId)}`,
   ),
